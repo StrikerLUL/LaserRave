@@ -18,9 +18,13 @@
       <header>
         <h1>Tiny Desk Raves</h1>
         <p>Virtual Laser Stage Simulator</p>
+        <div class="mode-tabs">
+          <button id="tab-live" class="active">Live Mode</button>
+          <button id="tab-studio">Studio Mode</button>
+        </div>
       </header>
 
-      <div class="control-panel">
+      <div class="control-panel" id="panel-live">
         <label for="audio-upload" class="upload-btn">
           <span>🎵 Load Audio (MP3/WAV)</span>
           <input type="file" id="audio-upload" accept="audio/*">
@@ -65,6 +69,37 @@
         
         <div class="audio-visualizer-container">
             <canvas id="audio-visualizer" width="300" height="60"></canvas>
+        </div>
+      </div>
+
+      <!-- Studio Mode Panel (Hidden by default) -->
+      <div class="control-panel hidden" id="panel-studio">
+        <p class="studio-intro">Klicke einen Laser in der 3D Ansicht an, um ihn zu verschieben oder zu drehen.</p>
+        
+        <div class="controls-grid">
+          <div class="control-group row">
+             <button id="btn-add-laser" class="btn-action">➕ Add Laser</button>
+             <button id="btn-remove-laser" class="btn-action btn-danger">🗑️ Delete Selected</button>
+          </div>
+          
+          <div class="control-group">
+            <label>Current Selected: <span id="lbl-selected-laser">None</span></label>
+            <div class="transform-mode-toggles">
+              <label><input type="radio" name="tm" value="translate" checked> Move</label>
+              <label><input type="radio" name="tm" value="rotate"> Rotate</label>
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 0.5rem 0;">
+
+        <div class="controls-grid">
+          <div class="control-group">
+            <label>Sequencer Scenes (<span id="lbl-scene-count">0</span> saved)</label>
+            <button id="btn-save-scene" class="btn-action btn-primary">📸 Save Current Scene as Frame</button>
+            <button id="btn-clear-scenes" class="btn-action btn-danger" style="margin-top:0.5rem;">🗑️ Clear All Scenes</button>
+          </div>
+          <p class="studio-hint">Im Live-Modus wird die Szene jetzt nach und nach diese Frames ablaufen, statt zufällig zu wackeln!</p>
         </div>
       </div>
     </div>

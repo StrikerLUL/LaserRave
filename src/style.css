@@ -221,3 +221,92 @@ select {
   height: 100%;
   display: block;
 }
+
+/* Studio UI Additions */
+.hidden {
+  display: none !important;
+}
+
+.mode-tabs {
+  display: flex;
+  margin-top: 0.8rem;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+}
+
+.mode-tabs button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 0.6rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.mode-tabs button.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.studio-intro, .studio-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: +1.4;
+}
+
+.row {
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.btn-action {
+  padding: 0.6rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  transition: all 0.2s;
+  flex: 1;
+}
+
+.btn-action:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--text-muted);
+}
+
+.btn-danger {
+  background: rgba(255, 50, 50, 0.15);
+  border-color: rgba(255, 50, 50, 0.3);
+  color: #ffaaaa;
+}
+
+.btn-danger:hover {
+  background: rgba(255, 50, 50, 0.25);
+  border-color: rgba(255, 50, 50, 0.6);
+}
+
+.btn-primary {
+  background: rgba(0, 255, 204, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-primary:hover {
+  background: rgba(0, 255, 204, 0.3);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.transform-mode-toggles {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.4rem;
+}
