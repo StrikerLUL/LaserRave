@@ -1,5 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Local env files
+*.local
+.env
+.env.*
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,15 +19,22 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Media / Song files (too large for GitHub)
+songs/
 
-# Editor directories and files
+# Test scripts
+test-browser.cjs
+test_errors.mjs
+
+# Temp / scratch files
+danach
+macheww
+verbessere
+
+# Editor directories
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Unity Raw 1.7 Simulator (Tiny Desk Raves)</title>
+    <title>Mainstage Laser Rave Simulator – 200+ Instanced Lights</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
@@ -29,11 +29,19 @@
           <span>🎵 Load Audio (MP3/WAV)</span>
           <input type="file" id="audio-upload" accept="audio/*">
         </label>
+        <label for="video-upload" class="upload-btn" style="margin-top:-0.5rem; background: rgba(50, 0, 100, 0.2);">
+          <span>📺 Load Background Video (Opt)</span>
+          <input type="file" id="video-upload" accept="video/*">
+        </label>
         <div id="track-name">No track loaded</div>
+        <div id="analysis-progress" style="display:none">
+          <div id="analysis-progress-fill"></div>
+        </div>
+        <div id="ai-fallback-warning" style="display:none; background: rgba(50,200,100,0.8); color: white; padding: 5px; border-radius: 4px; font-size: 0.8rem; margin-top: 5px; text-align: center;">        </div>
         
         <div class="controls-grid">
           <div class="control-group">
-            <label>Master Intensity</label>
+            <label>Laser Intensity</label>
             <input type="range" id="param-intensity" min="0.1" max="2" step="0.1" value="1.0">
           </div>
           <div class="control-group">
@@ -55,6 +63,7 @@
           <div class="control-group">
             <label>Color Theme</label>
             <select id="param-theme">
+              <option value="dynamic">Dynamic Audio-Reactive</option>
               <option value="rgb">RGB Classic</option>
               <option value="cyberpunk">Cyberpunk (Pink/Cyan)</option>
               <option value="warm">Fire (Red/Yellow)</option>
@@ -63,8 +72,141 @@
           </div>
         </div>
 
+        <div class="controls-section-label">Formation &amp; Beams</div>
+        <div class="controls-grid">
+          <div class="control-group">
+            <label>Formation / Placement</label>
+            <select id="param-formation">
+              <option value="front" selected>🟦 Front Trusses – Klassische Bühnenseite</option>
+              <option value="twin">🔲 Doppel-Truss – Zwei parallele Reihen</option>
+              <option value="sides">◀▶ Seitenwände – Quer durch die Tanzfläche</option>
+              <option value="surround">🔁 Surround – Vorne + beide Seiten</option>
+              <option value="corners">★ Ecktürme – 4 Ecken zeigen zur Mitte</option>
+              <option value="aerial">✦ Aerial Mix – Bühne + Seiten + Diagonal</option>
+              <option value="dancefloor">💃 Tanzflächen-Ring – Rundum die Dance Floor</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label>Laser Count: <span id="val-laser-count">180</span></label>
+            <input type="range" id="param-laser-count" min="2" max="200" step="2" value="180">
+          </div>
+          <div class="control-group">
+            <label>Moving Head Count: <span id="val-mh-count">120</span></label>
+            <input type="range" id="param-mh-count" min="4" max="240" step="4" value="120">
+          </div>
+          <div class="control-group">
+            <label>Beams per Laser: <span id="val-beams">1</span></label>
+            <input type="range" id="param-beams" min="1" max="5" step="1" value="1">
+          </div>
+          <div class="control-group">
+            <label>Beam Spread: <span id="val-spread-angle">16°</span></label>
+            <input type="range" id="param-beam-spread" min="5" max="60" step="5" value="16">
+          </div>
+          <div class="control-group" style="margin-top: 5px;">
+            <label for="svg-upload" class="upload-btn" style="background: rgba(255, 100, 50, 0.2); font-size: 0.8rem; padding: 0.5rem;">
+              <span>🔲 Load Projection (SVG/PNG)</span>
+              <input type="file" id="svg-upload" accept=".svg,.png,.jpg">
+            </label>
+          </div>
+        </div>
+
+        <div class="controls-section-label">Stage Lights</div>
+        <div class="controls-grid">
+          <div class="control-group">
+            <label>Head Intensity</label>
+            <input type="range" id="param-mh-intensity" min="0.0" max="2" step="0.1" value="1.0">
+          </div>
+          <div class="control-group">
+            <label>Head Speed</label>
+            <input type="range" id="param-mh-speed" min="0.1" max="5" step="0.1" value="1.0">
+          </div>
+          <div class="control-group">
+            <label>Up-Light Intensity</label>
+            <input type="range" id="param-ul-intensity" min="0.0" max="2" step="0.1" value="1.0">
+          </div>
+        </div>
+
+        <div class="controls-section-label">Atmosphere & Screens</div>
+        <div class="controls-grid">
+          <div class="control-group">
+            <label>Haze / Nebel: <span id="val-haze">50%</span></label>
+            <input type="range" id="param-haze" min="0" max="100" step="5" value="50">
+          </div>
+          <div class="control-group">
+            <label>Screen Brightness: <span id="val-screen-bright">100%</span></label>
+            <input type="range" id="param-screen-bright" min="0" max="200" step="10" value="100">
+          </div>
+          <div class="control-group">
+            <label>Screen Reactivity: <span id="val-screen-react">100%</span></label>
+            <input type="range" id="param-screen-react" min="0" max="100" step="10" value="100">
+          </div>
+        </div>
+
+        <div class="controls-section-label">VJ Console</div>
+        <div class="controls-grid" style="flex-direction:row; flex-wrap:wrap; justify-content:space-around; background: rgba(0,0,0,0.4); padding: 0.4rem; border-radius:8px; gap: 0.5rem;">
+            <label style="cursor:pointer; font-weight: 600; color: #ff00ff; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-autocam" style="accent-color: #ff00ff; cursor: pointer;"> 🎥 Auto-Cam
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #cc66ff; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-tvmode" style="accent-color: #cc66ff; cursor: pointer;"> 📺 TV Mode
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #00ffcc; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-movingheads" checked style="accent-color: #00ffcc; cursor: pointer;"> 💡 Heads
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #ffaa00; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-livecrowd" checked style="accent-color: #ffaa00; cursor: pointer;"> 🕺 Crowd
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #ffffff; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-uplights" checked style="accent-color: #ffffff; cursor: pointer;"> 🎇 Up-Lights
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #aaaaaa; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-bounce" style="accent-color: #aaaaaa; cursor: pointer;"> 🪞 Bounce
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #ff3333; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-fx-vhs" style="accent-color: #ff3333; cursor: pointer;"> 📼 VHS FX
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #66ccff; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-fx-blur" style="accent-color: #66ccff; cursor: pointer;"> 🌪️ Blur FX
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #ffffaa; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-fx-flare" checked style="accent-color: #ffffaa; cursor: pointer;"> ✨ Flares
+            </label>
+            <label style="cursor:pointer; font-weight: 600; color: #ff5555; flex: 1 1 30%; text-align: center;">
+               <input type="checkbox" id="param-peakmode" checked style="accent-color: #ff5555; cursor: pointer;"> 🧨 Peak Mode
+            </label>
+        </div>
+
+        <div class="controls-section-label">🔥 Pyrotechnik</div>
+        <div class="controls-grid pyro-grid">
+          <label class="pyro-toggle-label">
+            <input type="checkbox" id="param-pyro" style="accent-color: #ff6600; cursor: pointer;"> 🔥 Pyro Aktiv
+          </label>
+          <div class="control-group">
+            <label>Intensität: <span id="val-pyro-intensity">100%</span></label>
+            <input type="range" id="param-pyro-intensity" min="0" max="200" step="10" value="100">
+          </div>
+          <div class="control-group">
+            <label>Wind X (Links↔Rechts): <span id="val-wind-x">0</span></label>
+            <input type="range" id="param-wind-x" min="-20" max="20" step="1" value="0">
+          </div>
+          <div class="control-group">
+            <label>Wind Y (Thermik↑): <span id="val-wind-y">0</span></label>
+            <input type="range" id="param-wind-y" min="0" max="20" step="1" value="0">
+          </div>
+          <div class="control-group" style="display:flex; gap: 0.5rem; flex-wrap:wrap;">
+            <label style="cursor:pointer; color:#ff8800; font-size:0.85rem;">
+              <input type="checkbox" id="param-pyro-flame" checked style="accent-color:#ff6600;"> 🔥 Flammen
+            </label>
+            <label style="cursor:pointer; color:#ffee88; font-size:0.85rem;">
+              <input type="checkbox" id="param-pyro-spark" checked style="accent-color:#ffff00;"> ✨ Funken
+            </label>
+          </div>
+        </div>
+
         <div class="playback-controls">
           <button id="btn-play-pause" disabled>Play</button>
+          <button id="btn-record" style="background-color: #aa2222; margin-left: 0.5rem; font-size: 0.8rem; padding: 0.6rem 1rem;">🔴 Record Video</button>
+          <button id="btn-render" disabled style="background-color: #551122; margin-left: 0.5rem; font-size: 0.8rem; padding: 0.6rem 1rem;">🎬 4K Export</button>
         </div>
         
         <div class="audio-visualizer-container">
@@ -94,14 +236,61 @@
         <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 0.5rem 0;">
 
         <div class="controls-grid">
-          <div class="control-group">
-            <label>Sequencer Scenes (<span id="lbl-scene-count">0</span> saved)</label>
-            <button id="btn-save-scene" class="btn-action btn-primary">📸 Save Current Scene as Frame</button>
-            <button id="btn-clear-scenes" class="btn-action btn-danger" style="margin-top:0.5rem;">🗑️ Clear All Scenes</button>
-          </div>
-          <p class="studio-hint">Im Live-Modus wird die Szene jetzt nach und nach diese Frames ablaufen, statt zufällig zu wackeln!</p>
+          <p class="studio-hint">Nutze den Timeline-Editor unten am Bildschirmrand, um Keyframes für Helligkeit und Winkel hinzuzufügen.</p>
         </div>
       </div>
+    </div>
+
+    <!-- Song Timeline & Keyframe Editor -->
+    <div id="song-timeline" class="hidden">
+      <!-- Resizer handle to drag timeline height -->
+      <div id="timeline-resizer"></div>
+      
+      <div id="timeline-tracks-container">
+          <!-- Left Sidebar (Track Labels) -->
+          <div id="timeline-sidebar">
+              <div class="track-label global-track" data-track="intensity">💡 Global Intensity</div>
+              <div class="track-label global-track" data-track="speed">⏩ Global Speed</div>
+              <div class="track-label selected-track" data-track="pan">🔄 Sel. Pan</div>
+              <div class="track-label selected-track" data-track="tilt">↕️ Sel. Tilt</div>
+          </div>
+          <!-- Right Area (Canvas overlays for rendering tracks & keyframes) -->
+          <div id="timeline-content">
+              <!-- Background Canvas (Waveform, Beats, Sections) -->
+              <canvas id="timeline-canvas"></canvas>
+              <!-- Interactive Keyframe Overlay SVG for easy dragging -->
+              <svg id="timeline-svg" preserveAspectRatio="none">
+                 <!-- Curves and points will be injected via JS -->
+                 <path id="curve-intensity" class="kf-curve" d="" />
+                 <path id="curve-speed" class="kf-curve" d="" />
+                 <path id="curve-pan" class="kf-curve" d="" />
+                 <path id="curve-tilt" class="kf-curve" d="" />
+                 <g id="kf-points"></g>
+              </svg>
+              <!-- Playhead line -->
+              <div id="timeline-playhead"></div>
+          </div>
+      </div>
+
+      <div id="timeline-meta">
+        <span id="tl-time">0:00 / 0:00</span>
+        <span id="tl-section">—</span>
+        <div>
+           <button class="tl-btn" id="btn-add-kf">➕ Add Keyframe</button>
+           <button class="tl-btn" id="btn-del-kf">🗑️ Del Selected</button>
+           <span id="tl-bpm" style="margin-left: 1rem;">— BPM</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Render Overlay -->
+    <div id="render-overlay" style="display:none;">
+       <div class="render-box">
+          <h2>Rendering 4K Video...</h2>
+          <div id="render-progress-bar"><div id="render-progress-fill"></div></div>
+          <p id="render-status-text">0% - Initializing...</p>
+          <p id="render-eta" style="font-size: 0.8rem; color: #aaa; margin-top: 5px;">ETA: calculating...</p>
+       </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>

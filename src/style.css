@@ -41,7 +41,7 @@ body {
   flex-direction: column;
   gap: 0;
   overflow-y: auto;
-  padding: 1.5rem 1.2rem 2rem;
+  padding: 1.5rem 1.2rem 6rem;  /* 6rem bottom = room for timeline */
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.15) transparent;
   gap: 1rem;
@@ -118,6 +118,35 @@ header p {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-top: -0.5rem;
+}
+
+/* Analysis Progress Bar */
+#analysis-progress {
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 0.4rem;
+}
+#analysis-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00ffcc, #ff00ff);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 8px rgba(0,255,204,0.6);
+}
+
+.controls-section-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.7;
+  padding: 0.2rem 0 0.1rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  margin-top: 0.4rem;
 }
 
 .controls-grid {
@@ -309,4 +338,216 @@ select {
   display: flex;
   gap: 1rem;
   margin-top: 0.4rem;
+}
+
+/* ─── Pyro Panel ───────────────────────────────────────────────────────────────── */
+.pyro-grid {
+  background: rgba(80, 20, 0, 0.25);
+  border: 1px solid rgba(255, 100, 0, 0.2);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+}
+
+.pyro-toggle-label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #ff6600;
+  cursor: pointer;
+  margin-bottom: 0.3rem;
+  text-shadow: 0 0 8px rgba(255, 100, 0, 0.6);
+}
+
+/* ─── Song Timeline & Keyframe Editor ───────────────────────────────────────────── */
+#song-timeline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 250px;
+  z-index: 20;
+  background: rgba(5, 5, 18, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+#timeline-resizer {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 21;
+}
+
+#timeline-tracks-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+#timeline-sidebar {
+  width: 140px;
+  background: rgba(0, 0, 0, 0.4);
+  border-right: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.track-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  user-select: none;
+}
+
+.track-label.active {
+  color: var(--text-main);
+  background: rgba(255,255,255,0.05);
+  border-left: 3px solid var(--accent);
+}
+
+#timeline-content {
+  flex: 1;
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: crosshair;
+}
+
+#timeline-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#timeline-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none; /* Let only keyframes trigger events */
+}
+
+.kf-curve {
+  fill: none;
+  stroke: rgba(255,255,255,0.1);
+  stroke-width: 2px;
+}
+.kf-curve.active {
+  stroke: var(--accent);
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+
+.kf-point {
+  fill: var(--bg-dark);
+  stroke: var(--text-muted);
+  stroke-width: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.kf-point:hover { stroke: #fff; }
+.kf-point.selected {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+
+#timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #00ffcc;
+  pointer-events: none;
+  transform: translateX(-1px);
+  z-index: 5;
+  box-shadow: 0 0 10px #00ffcc;
+}
+
+#timeline-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 1rem 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: 'Outfit', sans-serif;
+  background: #000;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+#tl-time   { color: var(--accent); font-weight: 600; letter-spacing: 0.5px; }
+#tl-section { color: var(--text-main); font-weight: 500; }
+#tl-bpm    { color: #ff88cc; font-weight: 600; }
+
+.tl-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: var(--text-main);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  margin-left: 0.5rem;
+}
+.tl-btn:hover { background: rgba(255,255,255,0.1); }
+
+/* ─── Render Overlay ───────────────────────────────────────────── */
+#render-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.render-box {
+  background: var(--bg-dark);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 400px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(0, 255, 204, 0.2);
+}
+
+.render-box h2 {
+  color: var(--accent);
+  margin-bottom: 1rem;
+}
+
+#render-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.8rem;
+}
+
+#render-progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #00ffcc, #0099ff);
+  box-shadow: 0 0 10px rgba(0,255,204,0.5);
+  transition: width 0.1s linear;
 }
