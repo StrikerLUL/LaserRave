@@ -1,15 +1,14 @@
 import * as THREE from 'three';
+import { pass, uniform } from 'three/tsl';
+import { WebGPURenderer, RenderPipeline } from 'three/webgpu';
+import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
+import { afterImage } from 'three/examples/jsm/tsl/display/AfterImageNode.js';
+import { film } from 'three/examples/jsm/tsl/display/FilmNode.js';
+import { rgbShift } from 'three/examples/jsm/tsl/display/RGBShiftNode.js';
+
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
-import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { RGBShiftShader } from 'three/examples/jsm/shaders/RGBShiftShader.js';
-import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
-import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
+// Removed Reflector due to WebGPU incompatibility
 
 // Procedural Lens Flare Texture Generator
 function createFlareTexture() {
@@ -58,6 +57,7 @@ const globalGoboTexture = createGoboTexture();
 //  CONFIG
 // ─────────────────────────────────────────────
 const CFG = {
+  stageSize:     'large',  // 'large' or 'small'
   laserCount:    180,      // Massive stage scale
   movingHeadCount: 120,    // Massive stage scale
   intensity:     1.0,
@@ -128,21 +128,18 @@ let variationPhase    = 0;  // micro-variation index (0–3), changes every 16 b
 
 const W = window.innerWidth, H = window.innerHeight;
 
-const renderer = new THREE.WebGLRenderer({ 
+const renderer = new WebGPURenderer({ 
   antialias: true, 
-  preserveDrawingBuffer: true, 
-  powerPreference: "high-performance" 
+  powerPreference: "high-performance",
+  forceWebGL: false
 });
 renderer.setSize(W, H);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1;
+// Fix: Disable built-in tone mapping to allow TSL post-processing to handle colors organically without crushing HDR data before bloom.
+renderer.toneMapping = THREE.NoToneMapping;
 document.getElementById('canvas-container').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x070710);
-scene.fog = new THREE.FogExp2(0x070710, 0.018);
-
 const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
 camera.position.set(0, 12, 60); // Repositioned for the 200m stage scale
 camera.lookAt(0, 5, 0);
@@ -191,42 +188,59 @@ const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
 
-// ─── Bloom ───────────────────────────────────
+// ─── Post-Processing (TSL Node-based) ────────
 let fxBlurEnabled = false;
 let fxVhsEnabled = false;
 let raybounceEnabled = false;
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
+// The canonical way to set up WebGPU post-processing:
+// 1. Create a scene render pass
+// 2. Extract the color output texture node
+// 3. Chain effect nodes on top of it
+const scenePass = pass(scene, camera);
+const sceneColor = scenePass.getTextureNode('output');
 
-const bloom = new UnrealBloomPass(new THREE.Vector2(W, H), 1.2, 0.6, 0.65);
-composer.addPass(bloom);
+// Uniforms for VHS/blur controls
+const afterImageDamp  = uniform(0.88);
+const filmTimeUniform = uniform(0.0);
+const rgbShiftAmount  = uniform(0.0015);
 
-const afterimagePass = new AfterimagePass();
-afterimagePass.damp = 0.85;
-afterimagePass.enabled = false;
-composer.addPass(afterimagePass);
+// Build the base chain: bloom on top of scene (boosted for intense laser glow)
+const bloomNode = bloom(sceneColor, 1.0, 0.6, 0.15);
 
-const filmPass = new FilmPass(0.45, 0.025, 648, false);
-filmPass.enabled = false;
-composer.addPass(filmPass);
+// Post-processing instance (use the canonical class name in this three/webgpu version)
+let postProcessing;
+try {
+    postProcessing = new RenderPipeline(renderer);
+} catch(e) {
+    console.error('Could not create RenderPipeline', e);
+}
 
-const rgbShiftPass = new ShaderPass(RGBShiftShader);
-rgbShiftPass.uniforms['amount'].value = 0.0015;
-rgbShiftPass.enabled = false;
-composer.addPass(rgbShiftPass);
+// Start with bloom composite - VHS/blur added lazily when user enables them
+if (postProcessing) postProcessing.outputNode = sceneColor.add(bloomNode);
+
+// Proxy compat objects so legacy code that references filmPass.enabled etc still works
+const afterimagePass = { enabled: false };
+const filmPass     = { enabled: false, uniforms: { time: { get value() { return filmTimeUniform.value; }, set value(v) { filmTimeUniform.value = v; } } } };
+const rgbShiftPass = { enabled: false, uniforms: { amount: { get value() { return rgbShiftAmount.value; }, set value(v) { rgbShiftAmount.value = v; } } } };
+
+// Rebuilds the TSL output chain to include only the active effects
+function rebuildPostChain() {
+    if (!postProcessing) return;
+    let chain = sceneColor.add(bloomNode);
+    if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
+    if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
+    postProcessing.outputNode = chain;
+    postProcessing.needsUpdate = true;
+}
 
 // ─────────────────────────────────────────────
 //  STAGE ENVIRONMENT (MAINSTAGE EXPANSION)
 // ─────────────────────────────────────────────
 
+// Reduce metalness so ambient light can illuminate them! Without an environment map, metalness 0.9 makes objects pure black.
 const floorGeo = new THREE.PlaneGeometry(200, 150);
-const floor = new Reflector(floorGeo, {
-    clipBias: 0.003,
-    textureWidth: window.innerWidth * Math.min(window.devicePixelRatio, 2),
-    textureHeight: window.innerHeight * Math.min(window.devicePixelRatio, 2),
-    color: 0x222228
-});
+const floor = new THREE.Mesh(floorGeo, new THREE.MeshPhysicalMaterial({ color: 0x050505, roughness: 0.6, metalness: 0.1 }));
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
@@ -234,101 +248,24 @@ const grid = new THREE.GridHelper(200, 100, 0x222230, 0x111118);
 grid.position.y = 0.02;
 scene.add(grid);
 
-const trussMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9, roughness: 0.2 });
+const trussMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.3, roughness: 0.8 });
 
-// Massive Truss Structure
+let backWall = null;
+const stageGroup = new THREE.Group();
+scene.add(stageGroup);
+let screenMeshes = [];
+
+// Massive Truss Structure helper
 function createTruss(w, h, d, x, y, z, rx=0, ry=0, rz=0) {
     const geo = new THREE.BoxGeometry(w, h, d);
     const mesh = new THREE.Mesh(geo, trussMat);
     mesh.position.set(x, y, z);
     mesh.rotation.set(rx, ry, rz);
-    scene.add(mesh);
+    stageGroup.add(mesh); // Changed to stageGroup so we can clear it
     return mesh;
 }
 
-// Horizontal Main Trusses (Multiple layers)
-createTruss(120, 0.4, 0.4, 0, 18, -25);
-createTruss(120, 0.4, 0.4, 0, 14, -20);
-createTruss(120, 0.4, 0.4, 0, 10, -15);
-
-// Vertical Supports
-for (let x of [-45, -25, 0, 25, 45]) {
-    createTruss(0.3, 20, 0.3, x, 10, -25);
-}
-
-// Side "Wings" Trusses (Angled)
-createTruss(40, 0.4, 0.4, -60, 12, -10, 0, Math.PI / 4, 0);
-createTruss(40, 0.4, 0.4, 60, 12, -10, 0, -Math.PI / 4, 0);
-
-const backWall = new THREE.Mesh(
-  new THREE.PlaneGeometry(250, 60),
-  new THREE.MeshStandardMaterial({ color: 0x05050a, roughness: 1.0 })
-);
-backWall.position.set(0, 30, -50);
-scene.add(backWall);
-
-let ledScreenMat = new THREE.ShaderMaterial({
-  uniforms: {
-     tex: { value: null },
-     hasTex: { value: 0.0 },
-     baseColor: { value: new THREE.Color(0x000000) },
-     time: { value: 0 },
-     glitchIntensity: { value: 0 },
-     brightness: { value: 0 }
-  },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tex;
-    uniform float hasTex;
-    uniform vec3 baseColor;
-    uniform float time;
-    uniform float glitchIntensity;
-    uniform float brightness;
-    varying vec2 vUv;
-    
-    float random(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-
-    void main() {
-        vec2 p = vUv;
-        vec3 col = baseColor;
-        float jitter = 0.0;
-        
-        if (glitchIntensity > 0.05) {
-            float slice = floor(p.y * 25.0);
-            if (random(vec2(slice, time)) < glitchIntensity * 0.6) {
-                jitter = (random(vec2(slice, time + 1.0)) - 0.5) * glitchIntensity * 0.15;
-                p.x += jitter;
-            }
-        }
-        
-        if (hasTex > 0.5) {
-            if (glitchIntensity > 0.4) {
-                float shift = glitchIntensity * 0.04;
-                col.r = texture2D(tex, vec2(p.x + shift, p.y)).r;
-                col.g = texture2D(tex, p).g;
-                col.b = texture2D(tex, vec2(p.x - shift, p.y)).b;
-            } else {
-                col = texture2D(tex, p).rgb;
-            }
-        }
-        
-        gl_FragColor = vec4(col * brightness * 0.4 * (1.0 + glitchIntensity * 0.3), 1.0);
-    }
-  `,
-  side: THREE.DoubleSide
-});
-
-// ── DJ Booth & Massive LED Arrays ──
-const stageGroup = new THREE.Group();
-scene.add(stageGroup);
-
-const screenMeshes = [];
+let ledScreenMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
 
 function addScreen(w, h, x, y, z, ry=0) {
     const s = new THREE.Mesh(new THREE.PlaneGeometry(w, h), ledScreenMat);
@@ -339,52 +276,117 @@ function addScreen(w, h, x, y, z, ry=0) {
     return s;
 }
 
-// Center Massive Wall
-addScreen(30, 15, 0, 7.5, -30);
-
-// Side Wings (Towers)
-for (let i = 0; i < 3; i++) {
-    const xOff = 25 + i * 15;
-    const zPos = -25 + i * 5;
-    const ry = -Math.PI / 8 * (i + 1);
-    addScreen(8, 20, -xOff, 10, zPos, -ry);
-    addScreen(8, 20, xOff, 10, zPos, ry);
-}
-
-// DJ Booth Screens
-addScreen(8, 4, 0, 2, -15);
-
-// DJ Table
-const djTable = new THREE.Mesh(new THREE.BoxGeometry(6, 1.2, 2.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-djTable.position.set(0, 0.6, -15);
-stageGroup.add(djTable);
-
-// CDJs & Mixer
-const eqMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.5 });
-const mixer = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 1.5), eqMat);
-mixer.position.set(0, 1.3, -15);
-stageGroup.add(mixer);
-const cdj1 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
-cdj1.position.set(-1.4, 1.275, -15);
-stageGroup.add(cdj1);
-const cdj2 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
-cdj2.position.set(1.4, 1.275, -15);
-stageGroup.add(cdj2);
-
-// Massive PA Wall
-const paMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
-for (let side of [-1, 1]) {
-  for (let column = 0; column < 2; column++) {
-    const paGroup = new THREE.Group();
-    paGroup.position.set(side * (18 + column * 4), 0, -28);
-    for (let i = 0; i < 6; i++) {
-      const box = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), paMat);
-      box.position.y = 1 + i * 2.1;
-      paGroup.add(box);
+function buildStageEnvironment() {
+    // Clear old stage
+    while(stageGroup.children.length > 0){ 
+        const child = stageGroup.children[0];
+        stageGroup.remove(child); 
     }
-    stageGroup.add(paGroup);
-  }
+    screenMeshes.length = 0;
+
+    if (CFG.stageSize === 'large') {
+        // Horizontal Main Trusses (Multiple layers)
+        createTruss(120, 0.4, 0.4, 0, 18, -25);
+        createTruss(120, 0.4, 0.4, 0, 14, -20);
+        createTruss(120, 0.4, 0.4, 0, 10, -15);
+        
+        // Vertical Supports
+        for (let x of [-45, -25, 0, 25, 45]) {
+            createTruss(0.3, 20, 0.3, x, 10, -25);
+        }
+        
+        // Side "Wings" Trusses (Angled)
+        createTruss(40, 0.4, 0.4, -60, 12, -10, 0, Math.PI / 4, 0);
+        createTruss(40, 0.4, 0.4, 60, 12, -10, 0, -Math.PI / 4, 0);
+
+        backWall = new THREE.Mesh(
+          new THREE.PlaneGeometry(250, 60),
+          new THREE.MeshStandardMaterial({ color: 0x05050a, roughness: 1.0 })
+        );
+        backWall.position.set(0, 30, -50);
+        stageGroup.add(backWall);
+
+        // Center Massive Wall
+        addScreen(30, 15, 0, 7.5, -30);
+        
+        // Side Wings (Towers)
+        for (let i = 0; i < 3; i++) {
+            const xOff = 25 + i * 15;
+            const zPos = -25 + i * 5;
+            const ry = -Math.PI / 8 * (i + 1);
+            addScreen(8, 20, -xOff, 10, zPos, -ry);
+            addScreen(8, 20, xOff, 10, zPos, ry);
+        }
+        
+        // DJ Booth Screens
+        addScreen(8, 4, 0, 2, -15);
+        
+        // Massive PA Wall
+        const paMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
+        for (let side of [-1, 1]) {
+          for (let column = 0; column < 2; column++) {
+            const paGroup = new THREE.Group();
+            paGroup.position.set(side * (18 + column * 4), 0, -28);
+            for (let i = 0; i < 6; i++) {
+              const box = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), paMat);
+              box.position.y = 1 + i * 2.1;
+              paGroup.add(box);
+            }
+            stageGroup.add(paGroup);
+          }
+        }
+    } else {
+        // SMALL STAGE
+        // Single back truss
+        createTruss(40, 0.4, 0.4, 0, 10, -10);
+        // Vertical Supports
+        for (let x of [-18, 18]) {
+            createTruss(0.3, 10, 0.3, x, 5, -10);
+        }
+
+        backWall = new THREE.Mesh(
+          new THREE.PlaneGeometry(80, 30),
+          new THREE.MeshStandardMaterial({ color: 0x05050a, roughness: 1.0 })
+        );
+        backWall.position.set(0, 15, -15);
+        stageGroup.add(backWall);
+
+        // Single smaller screen behind DJ
+        addScreen(16, 9, 0, 5, -9);
+
+        // Small PA
+        const paMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
+        for (let side of [-1, 1]) {
+            const paGroup = new THREE.Group();
+            paGroup.position.set(side * 8, 0, -8);
+            for (let i = 0; i < 3; i++) {
+              const box = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), paMat);
+              box.position.y = 0.75 + i * 1.6;
+              paGroup.add(box);
+            }
+            stageGroup.add(paGroup);
+        }
+    }
+
+    // Common Elements (DJ Table + CDJs)
+    const djZ = CFG.stageSize === 'large' ? -15 : -6;
+    const djTable = new THREE.Mesh(new THREE.BoxGeometry(6, 1.2, 2.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+    djTable.position.set(0, 0.6, djZ);
+    stageGroup.add(djTable);
+    
+    const eqMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.5 });
+    const mixer = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 1.5), eqMat);
+    mixer.position.set(0, 1.3, djZ);
+    stageGroup.add(mixer);
+    const cdj1 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
+    cdj1.position.set(-1.4, 1.275, djZ);
+    stageGroup.add(cdj1);
+    const cdj2 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
+    cdj2.position.set(1.4, 1.275, djZ);
+    stageGroup.add(cdj2);
 }
+
+buildStageEnvironment();
 
 scene.add(new THREE.AmbientLight(0x222233, 1.8)); // Boosted ambient
 const stageLight = new THREE.PointLight(0x4444ff, 0.8, 100);
@@ -438,108 +440,41 @@ function curlNoise(x, y, z, t_offset) {
     };
 }
 
-// GLSL ShaderMaterial for fire/spark particles
-const fireMaterial = new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 } },
-    vertexShader: `
-        attribute float aAge;
-        attribute float aLifetime;
-        attribute float aSize;
-        attribute vec3  aColor;
-        varying float vAge;
-        varying float vLifetime;
-        varying vec3  vColor;
-        varying vec2  vUV;
-        void main() {
-            vAge      = aAge;
-            vLifetime = aLifetime;
-            vColor    = aColor;
-            vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = aSize * (450.0 / -mvPos.z);
-            gl_Position  = projectionMatrix * mvPos;
-        }`,
-    fragmentShader: `
-        varying float vAge;
-        varying float vLifetime;
-        varying vec3  vColor;
-        uniform float uTime;
-        
-        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
-        
-        void main() {
-            float lift = (vLifetime > 0.001) ? clamp(1.0 - vAge / vLifetime, 0.0, 1.0) : 0.0;
-            vec2 uv = gl_PointCoord - vec2(0.5);
-            float r = length(uv) * 2.0;
-            if (r > 1.0) discard;
+// Generate a circular glowing texture for particles to replace the old ShaderMaterial logic
+const particleCanvas = document.createElement('canvas');
+particleCanvas.width = 128;
+particleCanvas.height = 128;
+const pCtx = particleCanvas.getContext('2d');
+const pGrad = pCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+pGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+pGrad.addColorStop(0.2, 'rgba(255, 255, 200, 0.8)');
+pGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+pCtx.fillStyle = pGrad;
+pCtx.fillRect(0, 0, 128, 128);
+const particleTexture = new THREE.CanvasTexture(particleCanvas);
 
-            // Procedural Flame Noise / Flicker
-            float noise = hash(gl_PointCoord * 10.0 + floor(uTime * 20.0));
-            float flicker = 0.8 + 0.2 * sin(uTime * 30.0 + vAge * 10.0);
-            
-            float life = clamp(lift, 0.0, 1.0);
-            // Core is brighter, edges are darker/smokey
-            float grad = 1.0 - r;
-            grad = pow(grad, 1.5 + (1.0 - life) * 2.0); // Sharpen as it dies
-            
-            float alpha = grad * life * flicker * 0.9;
-            
-            // Color ramp: White -> Yellow -> Orange -> Red -> Black
-            vec3 col = vColor;
-            if (life > 0.8) col = mix(col, vec3(1.0, 1.0, 0.9), (life - 0.8) * 5.0); // White core
-            
-            gl_FragColor = vec4(col, alpha);
-        }`,
+const fireMaterial = new THREE.PointsMaterial({
+    size: 0.8,
+    vertexColors: true,
+    map: particleTexture,
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
+    opacity: 0.95
 });
 
-const sparkMaterial = new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 } },
-    vertexShader: `
-        attribute float aAge;
-        attribute float aLifetime;
-        attribute float aSize;
-        attribute vec3  aColor;
-        varying float vAge;
-        varying float vLifetime;
-        varying vec3  vColor;
-        void main() {
-            vAge      = aAge;
-            vLifetime = aLifetime;
-            vColor    = aColor;
-            vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = aSize * (300.0 / -mvPos.z);
-            gl_Position  = projectionMatrix * mvPos;
-        }`,
-    fragmentShader: `
-        varying float vAge;
-        varying float vLifetime;
-        varying vec3  vColor;
-        uniform float uTime;
-        void main() {
-            float lift = (vLifetime > 0.001) ? clamp(1.0 - vAge / vLifetime, 0.0, 1.0) : 0.0;
-            vec2 uv = gl_PointCoord - vec2(0.5);
-            float r = length(uv) * 2.0;
-            if (r > 1.0) discard;
-            
-            float life = clamp(lift, 0.0, 1.0);
-            // Star shape cross
-            float star = max(0.0, 1.0 - abs(uv.x) * 10.0) * max(0.0, 1.0 - abs(uv.y) * 2.0) +
-                         max(0.0, 1.0 - abs(uv.y) * 10.0) * max(0.0, 1.0 - abs(uv.x) * 2.0);
-            
-            // Twinkle
-            float twinkle = 0.7 + 0.3 * sin(uTime * 40.0 + vAge * 50.0);
-            float alpha = life * star * twinkle * 0.95;
-            gl_FragColor = vec4(vColor, alpha);
-        }`,
+const sparkMaterial = new THREE.PointsMaterial({
+    size: 0.25,
+    vertexColors: true,
+    map: particleTexture,
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
+    opacity: 0.95
 });
 
 class PyroSystem {
-    constructor({ x, y, z, type = 'flame', maxParticles = 600, emitDir = {x:0,y:1,z:0}, spread = 0.4 }) {
+    constructor({ x, y, z, type = 'flame', maxParticles = 15000, emitDir = {x:0,y:1,z:0}, spread = 0.4 }) {
         this.originX = x; this.originY = y; this.originZ = z;
         this.type = type; // 'flame' | 'spark'
         this.maxParticles = maxParticles;
@@ -562,6 +497,7 @@ class PyroSystem {
         this.cg = new Float32Array(maxParticles);
         this.cb = new Float32Array(maxParticles);
         this.alive = new Uint8Array(maxParticles);
+        this._nextSpawnIndex = 0;
         this.count = 0;
 
         // Three.js geometry & points object
@@ -588,10 +524,15 @@ class PyroSystem {
     }
 
     _spawnOne(energy, bass, isPeak) {
-        // Find a dead slot
+        // Find a dead slot efficiently
         let idx = -1;
         for (let i = 0; i < this.maxParticles; i++) {
-            if (!this.alive[i]) { idx = i; break; }
+            let chk = (this._nextSpawnIndex + i) % this.maxParticles;
+            if (!this.alive[chk]) { 
+                idx = chk; 
+                this._nextSpawnIndex = (chk + 1) % this.maxParticles;
+                break; 
+            }
         }
         if (idx === -1) return;
 
@@ -633,8 +574,8 @@ class PyroSystem {
         // Smooth decay
         this.burstIntensity *= Math.pow(0.94, dt * 60);
 
-        // Update Shader Time
-        if (this.points.material.uniforms.uTime) {
+        // Update Shader Time uniform
+        if (this.points.material.uniforms && this.points.material.uniforms.uTime) {
             this.points.material.uniforms.uTime.value = globalT;
         }
 
@@ -644,9 +585,10 @@ class PyroSystem {
         // Emit new particles (only if burst is active or high energy)
         const effectiveIntensity = Math.max(this.burstIntensity, energy * 0.5) * pyroIntensity;
         
+        const emitRateMultiplier = 25.0; // SCALE UP PARTICLE EMISSION FOR 15,000 count
         const emitRate = this.type === 'flame'
-            ? (bass * 150 + (isPeak ? 200 : 0)) * effectiveIntensity
-            : (energy * 100 + (isPeak ? 150 : 0)) * effectiveIntensity;
+            ? (bass * 150 + (isPeak ? 200 : 0)) * effectiveIntensity * emitRateMultiplier
+            : (energy * 100 + (isPeak ? 150 : 0)) * effectiveIntensity * emitRateMultiplier;
             
         this.emitAccum += emitRate * dt;
         while (this.emitAccum >= 1) {
@@ -746,26 +688,42 @@ function initPyroSystems() {
     pyroSystems.forEach(p => p.dispose());
     pyroSystems = [];
 
-    // 3 flamethrowers on left edge, 3 on right edge (at floor level, shooting up)
-    for (let side of [-1, 1]) {
-        for (let k = 0; k < 3; k++) {
-            const xPos = side * (8 + k * 4);
+    const sparkZ = CFG.stageSize === 'large' ? -10 : -3; 
+
+    if (CFG.stageSize === 'large') {
+        const pyroCount = 3;
+        // 3 flamethrowers on left edge, 3 on right edge (at floor level, shooting up)
+        for (let side of [-1, 1]) {
+            for (let k = 0; k < pyroCount; k++) {
+                const xPos = side * (8 + k * 4);
+                pyroSystems.push(new PyroSystem({
+                    x: xPos, y: 0.1, z: -12 + k * 2,
+                    type: 'flame',
+                    maxParticles: 500,
+                    emitDir: { x: side * 0.05, y: 1.0, z: 0 },
+                    spread: 0.25,
+                }));
+            }
+        }
+    } else {
+        // Small Stage - Only 1 flamethrower per side
+        for (let side of [-1, 1]) {
             pyroSystems.push(new PyroSystem({
-                x: xPos, y: 0.1, z: -12 + k * 2,
+                x: side * 4, y: 0.1, z: -3,
                 type: 'flame',
-                maxParticles: 500,
+                maxParticles: 300, // Reduced particles
                 emitDir: { x: side * 0.05, y: 1.0, z: 0 },
-                spread: 0.25,
+                spread: 0.2,
             }));
         }
     }
 
-    // 2 spark fountains on the DJ table surface
+    // 2 spark fountains on the DJ table surface (djZ table is moved in small stage so we adjust Z here)
     for (let side of [-1.5, 1.5]) {
         pyroSystems.push(new PyroSystem({
-            x: side, y: 1.4, z: -10,
+            x: side, y: 1.4, z: sparkZ,
             type: 'spark',
-            maxParticles: 400,
+            maxParticles: CFG.stageSize === 'large' ? 400 : 200,
             emitDir: { x: side * 0.3, y: 1.0, z: 0.1 },
             spread: 0.6,
         }));
@@ -834,7 +792,7 @@ function setupMovingHeadIM(count) {
     coneGeo.rotateX(-Math.PI / 2);          // now: tip at origin, base at z=+beamLen (toward audience)
     mhCoreIM = new THREE.InstancedMesh(coneGeo, new THREE.MeshBasicMaterial({
         color: 0xffffff,
-        transparent: true, opacity: 0.065,
+        transparent: true, opacity: 0.02 + CFG.hazeDensity * 0.06,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
         alphaMap: globalGoboTexture
     }), count);
@@ -844,7 +802,7 @@ function setupMovingHeadIM(count) {
     washGeo.rotateX(-Math.PI / 2);
     mhWashIM = new THREE.InstancedMesh(washGeo, new THREE.MeshBasicMaterial({
         color: 0xffffff,
-        transparent: true, opacity: 0.012,
+        transparent: true, opacity: CFG.hazeDensity * 0.02,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
     }), count);
 
@@ -929,11 +887,11 @@ function setupLaserIM(count) {
 
     // Beam: thin cylinder, axis along +Y, translated then rotated so it shoots toward +Z (audience)
     const beamLen = 65;
-    const coreGeo = new THREE.CylinderGeometry(0.04, 0.04, beamLen, 8, 1, true);
+    const coreGeo = new THREE.CylinderGeometry(0.12, 0.12, beamLen, 8, 1, true);
     coreGeo.translate(0, beamLen / 2, 0);
     coreGeo.rotateX(Math.PI / 2); // now shoots along +Z
     laserCoreIM = new THREE.InstancedMesh(coreGeo, new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.92,
+        color: 0xffffff, transparent: true, opacity: 0.1 + CFG.hazeDensity * 0.3,
         blending: THREE.AdditiveBlending, depthWrite: false
     }), count);
 
@@ -941,7 +899,7 @@ function setupLaserIM(count) {
     tubeGeo.translate(0, beamLen / 2, 0);
     tubeGeo.rotateX(Math.PI / 2);
     laserTubeIM = new THREE.InstancedMesh(tubeGeo, new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.13,
+        color: 0xffffff, transparent: true, opacity: CFG.hazeDensity * 0.15,
         blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false
     }), count);
 
@@ -950,6 +908,14 @@ function setupLaserIM(count) {
         im.frustumCulled = false; // Never cull large instanced arrays early
         scene.add(im);
     });
+
+    const _white = new THREE.Color(0xffffff);
+    for (let i = 0; i < count; i++) {
+        laserCoreIM.setColorAt(i, _white);
+        laserTubeIM.setColorAt(i, _white);
+    }
+    laserCoreIM.instanceColor.needsUpdate = true;
+    laserTubeIM.instanceColor.needsUpdate = true;
 }
 
 // ─── Formation Presets ────────────────────────────────────────────────────────
@@ -1193,6 +1159,26 @@ function createHaze() {
     if (hazeSystem) {
         scene.remove(hazeSystem);
         hazeSystem.geometry.dispose();
+        hazeSystem = null;
+    }
+
+    if (CFG.hazeDensity > 0) {
+        scene.fog = new THREE.FogExp2(0x020205, CFG.hazeDensity * 0.03);
+    } else {
+        scene.fog = null;
+    }
+
+    if (typeof laserCoreIM !== 'undefined' && laserCoreIM) {
+        laserCoreIM.material.opacity = 0.1 + CFG.hazeDensity * 0.3;
+    }
+    if (typeof laserTubeIM !== 'undefined' && laserTubeIM) {
+        laserTubeIM.material.opacity = CFG.hazeDensity * 0.15;
+    }
+    if (typeof mhCoreIM !== 'undefined' && mhCoreIM) {
+        mhCoreIM.material.opacity = 0.02 + CFG.hazeDensity * 0.06;
+    }
+    if (typeof mhWashIM !== 'undefined' && mhWashIM) {
+        mhWashIM.material.opacity = CFG.hazeDensity * 0.02;
     }
 }
 
@@ -1280,6 +1266,137 @@ function hueToHex(hue, sat = 1.0, lit = 0.58) {
   return (r << 16) | (g << 8) | b;
 }
 
+// ── Pattern from musical character (used ONLY for static song-analysis) ───────
+// This assigns a base pattern to each section during offline analysis.
+// The real-time override is handled by livePatternDecider() in the animation loop.
+function pickPattern(bass, mid, high, energy, idx) {
+  if (energy < 0.15) return ['sidesweep', 'pulse', 'sine'][idx % 3];
+  if (energy > 0.80) return ['scatter', 'strobe', 'sparkle', 'chase-fast'][idx % 4];
+  if (bass > mid && bass > high)  return ['fan', 'salvo', 'zigzag', 'wave'][idx % 4];
+  if (high > bass && high > mid)  return ['chase-fast', 'sparkle', 'zigzag', 'scatter'][idx % 4];
+  return ['wave', 'tunnel', 'chase', 'sine'][idx % 4]; // mid-dominant
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  LIVE PATTERN DECISION SYSTEM
+//  Evaluates real-time audio signals (bass / energy / buildUp / kick /
+//  melody / drums) every frame and picks the BEST fitting pattern with:
+//    • Priority rules (peak > buildUp > silence > spectral character)
+//    • Hysteresis: a new pattern must be "wanted" for N consecutive frames
+//      before switching, preventing jittery micro-switches.
+//    • Cooldown: after switching, cannot switch again for minHoldFrames.
+//    • Section baseline: falls back to the offline-analyzed section.pattern
+//      when no strong live signal overrides it.
+// ═══════════════════════════════════════════════════════════════════════
+const _lpd = {
+  currentPattern:   'fan',   // pattern currently being rendered
+  candidatePattern: null,    // pattern that WANTS to take over
+  candidateFrames:  0,       // how many consecutive frames candidate has been wanted
+  holdTimer:        0,       // frames remaining before we're allowed to switch
+
+  // Thresholds — tuned for house/techno/EDM but work across genres
+  HYSTERESIS_FRAMES: 6,      // must want new pattern for this many frames before switching
+  MIN_HOLD_FRAMES:   55,     // after switching, lock in for at least this many frames (~0.9s @60fps)
+};
+
+function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drums, section, isPeakDrop, isSilent) {
+  // ── 1. Determine what pattern is WANTED right now ───────────────────
+  let wanted;
+
+  if (!playing || isSilent) {
+    // No music / silence → gentle ambient sweep
+    wanted = 'sidesweep';
+
+  } else if (isPeakDrop) {
+    // ── DROP / CLIMAX  (energy > 0.85 AND not a build-up) ──────────────
+    // Alternate between scatter and strobe so every peak feels different
+    // Use the section seed to pick one deterministically per drop section.
+    const dropChoice = section ? (section.id % 2) : 0;
+    wanted = dropChoice === 0 ? 'scatter' : 'strobe';
+
+  } else if (buildUp > 0.60) {
+    // ── INTENSE BUILD-UP  ───────────────────────────────────────────────
+    // Salvo converges beams toward a focal point, creating growing tension.
+    // If buildUp is extreme (>0.85) switch to tunnel for max claustrophobia.
+    wanted = buildUp > 0.85 ? 'tunnel' : 'salvo';
+
+  } else if (energy < 0.12) {
+    // ── NEAR-SILENCE / BREAKDOWN  ──────────────────────────────────────
+    wanted = 'pulse';
+
+  } else if (energy < 0.25) {
+    // ── LOW ENERGY  ────────────────────────────────────────────────────
+    // Slow sweeping scan works well for intros and quiet passages
+    wanted = mid > bass ? 'sine' : 'sidesweep';
+
+  } else {
+    // ── NORMAL ENERGY RANGE (0.25–0.85) ─────────────────────────────────
+    // Decide based on spectral dominance + section character.
+    const bassDom   = bass   > mid  && bass   > high;   // kick-heavy beat
+    const trebleDom = high   > bass && high   > mid;    // synth/hi-hat driven
+    const midDom    = mid    > bass && mid    > high;   // vocal / melody lead
+    const melHigh   = melody > 0.4;                     // strong melody line
+
+    if (bassDom && energy > 0.55) {
+      // Hard bass → fan (maximises width, very visible on beat)
+      wanted = energy > 0.70 ? 'fan' : 'zigzag';
+
+    } else if (bassDom && kick > 0.50) {
+      // Bass + strong kick → salvo bursts (locks then explodes on kick)
+      wanted = 'salvo';
+
+    } else if (trebleDom && energy > 0.50) {
+      // High-frequency dominant → fast chase creates urgency
+      wanted = energy > 0.68 ? 'chase-fast' : 'chase';
+
+    } else if (trebleDom && energy < 0.50) {
+      // Quiet treble → sparkle (random twinkling fits hi-hats)
+      wanted = 'sparkle';
+
+    } else if (midDom && melHigh) {
+      // Melody lead → wave (smooth travelling ripple follows melodic arc)
+      wanted = 'wave';
+
+    } else if (midDom) {
+      // Mid-dominant without clear melody → tunnel (hypnotic, mid-range)
+      wanted = 'tunnel';
+
+    } else {
+      // Mixed / ambiguous → fall back to section baseline (offline analysis)
+      wanted = section ? section.pattern : 'fan';
+    }
+  }
+
+  // ── 2. Apply hysteresis (avoid jitter) ──────────────────────────────
+  if (_lpd.holdTimer > 0) {
+    _lpd.holdTimer--;
+    return _lpd.currentPattern; // locked in, don't even consider switching
+  }
+
+  if (wanted === _lpd.currentPattern) {
+    _lpd.candidatePattern = null;
+    _lpd.candidateFrames  = 0;
+    return _lpd.currentPattern;
+  }
+
+  if (wanted === _lpd.candidatePattern) {
+    _lpd.candidateFrames++;
+    if (_lpd.candidateFrames >= _lpd.HYSTERESIS_FRAMES) {
+      // Commit the switch
+      _lpd.currentPattern   = _lpd.candidatePattern;
+      _lpd.candidatePattern = null;
+      _lpd.candidateFrames  = 0;
+      _lpd.holdTimer        = _lpd.MIN_HOLD_FRAMES;
+    }
+  } else {
+    // New candidate — start counting
+    _lpd.candidatePattern = wanted;
+    _lpd.candidateFrames  = 1;
+  }
+
+  return _lpd.currentPattern;
+}
+
 // ── Offline band render helper ─────────────────────────────────
 async function renderBand(buf, loHz, hiHz) {
   const ctx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
@@ -1334,15 +1451,7 @@ function makeLissajous(seed) {
   };
 }
 
-// ── Pattern from musical character ───────────────────────────
-function pickPattern(bass, mid, high, energy, idx) {
-  if (energy < 0.12) return 'sidesweep';
-  if (bass  > mid  && bass  > high ) return 'fan';
-  if (high  > bass && high  > mid  ) return 'scatter';
-  if (mid   > bass && mid   > high ) return 'wave';
-  if (energy > 0.75) return 'strobe';
-  return PATTERNS[idx % PATTERNS.length];
-}
+
 
 // ── Full song analysis ────────────────────────────────────────
 async function analyzeSong(audioBuf, fileName) {
@@ -1437,7 +1546,7 @@ async function analyzeSong(audioBuf, fileName) {
                + Math.abs(highMap[f] - highMap[f-nw]);
   }
 
-  const minSF = Math.round(7 / hopSec);
+  const minSF = Math.round(1.5 / hopSec);
   const bounds = [0];
   let lastB = 0;
   for (let f = minSF; f < N - minSF; f++) {
@@ -1527,13 +1636,16 @@ function getCurrentSection() {
 let videoObj = null;
 let videoTexture = null;
 const videoCanvas = document.createElement('canvas');
-videoCanvas.width = 1; videoCanvas.height = 1;
+videoCanvas.width = 16; videoCanvas.height = 16;
 const videoCtx = videoCanvas.getContext('2d', { willReadFrequently: true });
 let videoAvgColor = [255, 255, 255];
 let videoBaseHue = null;
+let extractedVideoHues = [];
+let lastVideoExtractT = 0;
 
 // ── Recording State ───────────────────────────────────────────
 let isRecording = false;
+let tiktokModeEnabled = false;
 let mediaRecorder = null;
 let recordedChunks = [];
 let mediaStreamDest = null;
@@ -1650,7 +1762,28 @@ function toggleRecording() {
     };
     
     mediaRecorder.start();
-    if (!playing) togglePlay(); 
+    
+    if (tiktokModeEnabled && songMap && songMap.sections.length > 0) {
+      // Find the highest energy section (main drop)
+      let peakSec = songMap.sections[0];
+      for(let s of songMap.sections) {
+          if (s.avgEnergy > peakSec.avgEnergy) peakSec = s;
+      }
+      // Allow 3 seconds build-up
+      const jumpTimeOffset = Math.max(0, peakSec.startTime - 3.0);
+      
+      // The user can now manually determine when to stop the recording.
+      if (playing) {
+          togglePlay(); // Stop current playback
+          playbackStartOffset = jumpTimeOffset;
+          togglePlay(); // Restart at drop
+      } else {
+          playbackStartOffset = jumpTimeOffset;
+          togglePlay();
+      }
+    } else {
+      if (!playing) togglePlay(); 
+    }
   }
 }
 
@@ -1707,14 +1840,9 @@ document.getElementById('video-upload').addEventListener('change', e => {
   videoTexture.magFilter = THREE.LinearFilter;
   
   if (ledScreenMat) {
-    if (ledScreenMat.isShaderMaterial) {
-      ledScreenMat.uniforms.tex.value = videoTexture;
-      ledScreenMat.uniforms.hasTex.value = 1.0;
-    } else {
       ledScreenMat.map = videoTexture;
       ledScreenMat.needsUpdate = true;
       ledScreenMat.color.setHex(0xffffff);
-    }
   }
 });
 document.getElementById('param-autocam').addEventListener('change', e => {
@@ -1755,9 +1883,10 @@ const elUlIntensity = document.getElementById('param-ul-intensity');
 if(elUlIntensity) elUlIntensity.addEventListener('input', e => { CFG.ulIntensity = +e.target.value; });
 document.getElementById('param-bounce').addEventListener('change', e => raybounceEnabled = e.target.checked);
 document.getElementById('param-fx-vhs').addEventListener('change', e => { 
-  fxVhsEnabled = e.target.checked; 
-  filmPass.enabled = fxVhsEnabled; 
-  rgbShiftPass.enabled = fxVhsEnabled; 
+  fxVhsEnabled = e.target.checked;
+  filmPass.enabled = fxVhsEnabled;
+  rgbShiftPass.enabled = fxVhsEnabled;
+  rebuildPostChain();
 });
 
 let fxFlareEnabled = true;
@@ -1773,9 +1902,17 @@ const paramPeak = document.getElementById('param-peakmode');
 if(paramPeak) paramPeak.addEventListener('change', e => peakModeEnabled = e.target.checked);
 
 document.getElementById('param-fx-blur').addEventListener('change', e => { 
-  fxBlurEnabled = e.target.checked; 
-  afterimagePass.enabled = fxBlurEnabled; 
+  fxBlurEnabled = e.target.checked;
+  afterimagePass.enabled = fxBlurEnabled;
+  rebuildPostChain();
 });
+const paramTiktok = document.getElementById('param-tiktok');
+if (paramTiktok) {
+  paramTiktok.addEventListener('change', e => {
+    tiktokModeEnabled = e.target.checked;
+    window.dispatchEvent(new Event('resize')); 
+  });
+}
 document.getElementById('btn-play-pause').addEventListener('click', togglePlay);
 document.getElementById('btn-record').addEventListener('click', toggleRecording);
 document.getElementById('param-intensity').addEventListener('input', e => { CFG.intensity = +e.target.value; });
@@ -1788,6 +1925,27 @@ document.getElementById('param-tilt').addEventListener('input', e => { CFG.tilt 
 document.getElementById('param-theme').addEventListener('change', e => { CFG.theme = e.target.value; refreshLaserColors(); });
 
 // ── New formation / beam controls ──────────────────────────────
+document.getElementById('param-stage-size').addEventListener('change', e => {
+    CFG.stageSize = e.target.value;
+    
+    const newLaserCount = CFG.stageSize === 'large' ? 180 : 40;
+    const newMhCount    = CFG.stageSize === 'large' ? 120 : 20;
+    
+    if(laserCountSlider) {
+        laserCountSlider.value = newLaserCount;
+        laserCountVal.textContent = newLaserCount;
+    }
+    if(mhCountSlider) {
+        mhCountSlider.value = newMhCount;
+        mhCountVal.textContent = newMhCount;
+    }
+
+    buildStageEnvironment();
+    initLasers(newLaserCount);
+    initMovingHeads(newMhCount);
+    initPyroSystems();
+});
+
 document.getElementById('param-formation').addEventListener('change', e => {
     CFG.formation = e.target.value; initLasers();
 });
@@ -1994,7 +2152,7 @@ function detectTransient(high) {
   return high > Math.max(avg * 1.7, 0.18);
 }
 
-const PATTERNS = ['fan', 'xcross', 'scatter', 'wave', 'strobe', 'sidesweep', 'salvo', 'tunnel'];
+const PATTERNS = ['fan', 'xcross', 'scatter', 'wave', 'strobe', 'sidesweep', 'salvo', 'tunnel', 'sine', 'chase', 'chase-fast', 'sparkle', 'pulse', 'zigzag'];
 
 // ─────────────────────────────────────────────
 //  SONG TIMELINE RENDERER
@@ -2071,7 +2229,11 @@ function updateTimeline() {
   const fmt = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
   document.getElementById('tl-time').textContent = `${fmt(nowT)} / ${fmt(dur)}`;
   document.getElementById('tl-bpm').textContent  = `${songMap.bpm || 128} BPM`;
-  document.getElementById('tl-section').textContent = activeSec ? `Sec ${activeSec.id+1} · ${activeSec.pattern}` : '—';
+  // Show the LIVE active pattern (from livePatternDecider) next to the section baseline
+  const livePatLabel = _lpd.currentPattern !== (activeSec ? activeSec.pattern : '') 
+    ? ` → ${_lpd.currentPattern}` : '';
+  document.getElementById('tl-section').textContent = activeSec 
+    ? `Sec ${activeSec.id+1} · ${activeSec.pattern}${livePatLabel}` : '—';
   
   // Render SVG Keyframe Curves
   const tracks = ['intensity', 'speed', 'pan', 'tilt'];
@@ -2120,6 +2282,8 @@ function updateTimeline() {
 //  ANIMATION LOOP
 // ─────────────────────────────────────────────
 let t = 0;
+let dynamicBeatPhase = 0;
+let lastRawBeatPhase = 0;
 
 let _wQuat = null;
 let _wPos = null;
@@ -2167,7 +2331,7 @@ function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPea
 
         // ── Opacity ───────────────────────────────────────────────────
         let mhOp = isSilent
-            ? 0.04
+            ? 0.0
             : Math.min(1.0, vocals * 1.1 + drums * 0.45 + beatState.flashDecay * 0.45 + hs.adsrState * 0.6) * CFG.mhIntensity;
         if (currentMode === 'studio') mhOp = Math.max(mhOp, 0.45);
 
@@ -2359,17 +2523,47 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 }
                 // ─── STROBE: static positions with hard flicker ──────────────
                 case 'strobe': {
-                    localPan  = Math.sin(lxp + vOff) * norm2 * 0.6 * sp;
-                    localTilt = tiltRad + Math.cos(lzp + wn * Math.PI + vOff) * 0.35 * sp;
+                    const strobeVar = isPeakDrop ? Math.floor(tAnim * 8) : 0;
+                    localPan  = Math.sin(lxp + vOff + strobeVar * 2.1) * norm2 * (isPeakDrop ? 1.3 : 0.6) * sp;
+                    localTilt = tiltRad + Math.cos(lzp + wn * Math.PI + vOff + strobeVar * 1.7) * (isPeakDrop ? 0.7 : 0.35) * sp;
                     break;
                 }
                 // ─── SCATTER: chaos – used during peak drops ─────────────────
                 case 'scatter': {
-                    localPan  = Math.sin(tAnim * lxf * 1.4 + lxp) * 0.85 * sp
-                               + Math.cos(tAnim * lyf * 1.1 + lyp) * 0.4 * sp
-                               + freqBias * 0.4 * iPhase;
+                    const scatterSpeed = isPeakDrop ? 4.5 : 1.4;
+                    const scatterWarp = isPeakDrop ? 2.5 : 1.0;
+                    localPan  = Math.sin(tAnim * lxf * scatterSpeed + lxp) * 1.2 * sp * scatterWarp
+                               + Math.cos(tAnim * lyf * scatterSpeed * 0.8 + lyp) * 0.6 * sp * scatterWarp
+                               + freqBias * 0.6 * iPhase;
                     localTilt = tiltRad
-                               + Math.sin(tAnim * lzf * 1.2 + lzp) * 0.55 * sp;
+                               + Math.sin(tAnim * lzf * scatterSpeed * 0.9 + lzp) * 0.9 * sp * scatterWarp;
+                    break;
+                }
+                // ─── SINE: Smooth mathematical sine wave ───────────────────
+                case 'sine': {
+                    const waveT = tAnim * lxf * 1.2 + wn * Math.PI * 4.0;
+                    localPan = Math.sin(waveT) * 0.6 * sp;
+                    localTilt = tiltRad + Math.cos(waveT * 0.8) * 0.2 * sp;
+                    break;
+                }
+                // ─── CHASE etc. movements ──────────────────────────────
+                case 'chase':
+                case 'chase-fast': {
+                    localPan = norm2 * 0.6 * sp;
+                    localTilt = tiltRad + Math.sin(tAnim * lyf * 0.5 + wn * Math.PI * 2) * 0.15 * sp;
+                    break;
+                }
+                // ─── ZIGZAG: sharp alternating tilts ─────────────────────
+                case 'zigzag': {
+                    localPan = norm2 * 0.8 * sp + iPhase * Math.sin(tAnim * 2.5) * 0.2 * sp;
+                    localTilt = tiltRad + iPhase * 0.25 * sp;
+                    break;
+                }
+                // ─── SPARKLE / PULSE ─────────────────────────────────────
+                case 'sparkle':
+                case 'pulse': {
+                    localPan = Math.sin(lxp + vOff + tAnim * 0.1) * norm2 * 0.7 * sp;
+                    localTilt = tiltRad + Math.cos(lzp + wn * Math.PI) * 0.3 * sp;
                     break;
                 }
                 default: {
@@ -2380,9 +2574,10 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
 
             // ── Peak-drop chaos overlay – adds controlled jitter at climax ──
             if (energy > 0.80) {
-                const chaosStr = (energy - 0.80) * 5.0 * (isPeakDrop ? 1.8 : 0.6);
-                localPan  += Math.sin(tAnim * 31 + i * 1.3) * 0.35 * chaosStr * kick;
-                localTilt += Math.cos(tAnim * 37 + i * 1.9) * 0.22 * chaosStr * kick;
+                const chaosStr = (energy - 0.80) * 5.0 * (isPeakDrop ? 3.0 : 0.6);
+                const activity = isPeakDrop ? (0.4 + kick * 0.6) : kick; // Continuous movement during drops!
+                localPan  += Math.sin(tAnim * 45 + i * 2.1) * 0.8 * chaosStr * activity;
+                localTilt += Math.cos(tAnim * 53 + i * 2.7) * 0.5 * chaosStr * activity;
             }
 
             // ── Convert local pan/tilt to world Euler (YXZ order) ──────────
@@ -2404,12 +2599,33 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
         }
 
         // ── Opacity ─────────────────────────────────────────────────────
+        let patternOpMod = 1.0;
+        if (!skipPattern && !isSilent) {
+            if (pat === 'chase') {
+                // Moderate chase based on spatial arrangement
+                const chasePos = (tAnim * 0.45) % 1.0;
+                patternOpMod = Math.abs(wn - chasePos) < 0.15 ? 1.0 : 0.0;
+            } else if (pat === 'chase-fast') {
+                // Extremely fast chase
+                const chasePos = (tAnim * 1.8) % 1.0;
+                patternOpMod = Math.abs(wn - chasePos) < 0.25 ? 1.0 : 0.0;
+            } else if (pat === 'sparkle') {
+                // Random sparkle per laser
+                patternOpMod = (Math.sin(tAnim * 17.3 + i * 21.1) > 0.85) ? 1.0 : 0.0;
+            } else if (pat === 'pulse') {
+                // Alternate breathing
+                patternOpMod = 0.5 + Math.sin(tAnim * 2.0 + iPhase * Math.PI) * 0.5;
+            } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
+                patternOpMod = 0.0;
+            }
+        }
+
         const freqBiasOp = playing ? melody : 0;
         let op = isSilent
-            ? 0.04
-            : Math.min(1, 0.04 * CFG.intensity + (freqBiasOp || 0) * 1.1 + energy * 0.6 + buildUp * 0.4 + beatState.flashDecay * 0.9);
+            ? ((!playing && isSilent) ? 0.3 : 0.0) // Keep minimum visibility of 0.3 if idle so the app doesn't look black
+            : patternOpMod * Math.min(1, 0.08 * CFG.intensity + (freqBiasOp || 0) * 1.1 + energy * 0.6 + buildUp * 0.4 + beatState.flashDecay * 0.9);
+        
         if (currentMode === 'studio') op = Math.max(op, 0.5);
-        if (pat === 'strobe' && !beatState.strobeOn && playing) op = 0;
 
         // ── Matrices (always absolute – no accumulation) ─────────────────
         // Body: just sits at position, no rotation
@@ -2448,9 +2664,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
 }
 
 function animate() {
-  if (!isOfflineRendering) {
-      requestAnimationFrame(animate);
-  }
+  // Using setAnimationLoop below instead of requestAnimationFrame
+
   controls.update();
 
   // Basic t increment always moving for UI/Background noise
@@ -2496,7 +2711,8 @@ function animate() {
       rtHigh   = avgRange(dataArray, 80, 128);
       rtEnergy = rtBass * 0.5 + rtMid * 0.3 + rtHigh * 0.2;
   }
-  const isSilent = playing ? (rtEnergy < 0.015) : true;
+  const isSilent = playing ? (rtEnergy < 0.04) : true;
+  const isIdleDarkness = isSilent && !playing; // Only full silence if effectively playing music but paused
 
   // ── Song-map frame lookup (Stems) ────────────────────────────
   const frame   = playing ? getSongFrame()      : null;
@@ -2525,17 +2741,43 @@ function animate() {
   const isPeakDrop = playing && peakModeEnabled && energy > 0.85 && buildUp < 0.2;
 
   // ── Section-driven parameters ─────────────────────────────────
-  const secPat    = section ? section.pattern    : PATTERNS[0];
+  // secPat is now determined by the LIVE intelligent pattern decider,
+  // not just frozen at analysis time. Section baseline still feeds in.
+  const secPat    = livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drums, section, isPeakDrop, isSilent);
   const liss      = section ? section.liss       : makeLissajous(0);
   const secSpeed  = section ? section.speedScale : 1.0;
   const secSpread = section ? section.spreadMod  : 1.0;
 
-  // ── BPM-locked beat phase ─────────────────────────────────────
-  // tBeat = fractional beat count; one full cycle = 8 beats
-  const bpmBeatPhase = getBeatPhase();
-  const tBeat = bpmBeatPhase * (Math.PI * 2 / 8);
-  // Blend: BPM-locked when playing a song, free-running otherwise
-  const tAnim = (playing && songMap) ? tBeat : t;
+  // ── BPM-locked dynamic beat phase ─────────────────────────────
+  // Instead of strictly locking to absolute time, we accumulate phase
+  // with a dynamic multiplier based on audio energy, bass and kick hits.
+  const rawBeatPhase = getBeatPhase();
+  const phaseDelta = rawBeatPhase - lastRawBeatPhase;
+  lastRawBeatPhase = rawBeatPhase;
+
+  if (phaseDelta < 0 || phaseDelta > 1 || !playing) {
+      // Reset accumulator if user scrubbed the timeline or looped
+      dynamicBeatPhase = rawBeatPhase;
+  } else {
+      // Map energy (0..1) to a speed multiplier
+      // Low energy = slow (0.3x), High energy = fast (up to 2.5x+)
+      const energyMultiplier = Math.pow(energy, 1.5) * 2.0 + 0.3;
+      
+      // Additional bursts of speed on heavy bass and kicks
+      const bassBoost = 1.0 + (bass * 2.0);
+      const transientBoost = beatState.speedMult; // Uses real-time peak info (from 1.0 to 5.5)
+
+      // Normalize keeping average speed pleasing, honoring UI speed scale
+      let dynamicSpeed = CFG.speed * secSpeed * energyMultiplier * bassBoost * transientBoost * 0.35;
+      
+      // Cap maximum speed to avoid chaotic strobe-like movement
+      dynamicSpeed = Math.min(dynamicSpeed, 8.0);
+      
+      dynamicBeatPhase += phaseDelta * dynamicSpeed;
+  }
+
+  // Blend: Dynamic BPM phase when playing a song, free-running otherwise
+  const tAnim = (playing && songMap) ? dynamicBeatPhase * (Math.PI * 2 / 8) : t;
 
   // ── Section change → update target colors + variation ─────────
     if (section && section.id !== lastSectionId) {
@@ -2581,50 +2823,85 @@ function animate() {
     // ── Video Color Extraction ───────────────────────────────
     let hasVideoColor = false;
     if (playing && videoObj && videoObj.readyState >= 2) {
-      videoCtx.drawImage(videoObj, 0, 0, 1, 1);
-      const px = videoCtx.getImageData(0, 0, 1, 1).data;
-      if (px[0] > 15 || px[1] > 15 || px[2] > 15) {
-         videoAvgColor = [px[0], px[1], px[2]];
-         hasVideoColor = true;
-         const r = px[0]/255, g = px[1]/255, b = px[2]/255;
-         const max = Math.max(r, g, b), min = Math.min(r, g, b);
-         let h = 0;
-         if (max !== min) {
-           const d = max - min;
-           switch(max) {
-             case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-             case g: h = (b - r) / d + 2; break;
-             case b: h = (r - g) / d + 4; break;
-           }
-           h /= 6;
-         }
-         videoBaseHue = h * 360;
+      if (tAnim - lastVideoExtractT > 0.1) { // Max ~10 updates a sec to save perf
+          lastVideoExtractT = tAnim;
+          videoCtx.drawImage(videoObj, 0, 0, 16, 16);
+          const px = videoCtx.getImageData(0, 0, 16, 16).data;
+          
+          let vibrantPx = [];
+          for (let i = 0; i < px.length; i += 4) {
+              const r = px[i]/255, g = px[i+1]/255, b = px[i+2]/255;
+              const max = Math.max(r, g, b), min = Math.min(r, g, b);
+              if (max < 0.1) continue; // skip too dark
+              
+              let h = 0, s = 0, l = (max + min) / 2;
+              if (max !== min) {
+                  const d = max - min;
+                  s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                  switch(max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    case b: h = (r - g) / d + 4; break;
+                  }
+                  h /= 6;
+              }
+              if (s > 0.25 && l > 0.15) { // Only take vibrant, colorful pixels
+                  vibrantPx.push({ h: h * 360, s, l, score: s * l });
+              }
+          }
+          
+          if (vibrantPx.length > 0) {
+              // Sort by vibrancy score
+              vibrantPx.sort((a,b) => b.score - a.score);
+              let distinctHues = [];
+              for (const v of vibrantPx) {
+                  if (distinctHues.length >= 6) break;
+                  let conflict = false;
+                  // Ensure colors are visually distinct (at least 30 deg apart)
+                  for (const dh of distinctHues) {
+                      let dist = Math.abs(v.h - dh);
+                      if (Math.min(dist, 360 - dist) < 30) { conflict = true; break; }
+                  }
+                  if (!conflict) distinctHues.push(v.h);
+              }
+              if (distinctHues.length === 0) distinctHues.push(vibrantPx[0].h);
+              extractedVideoHues = distinctHues;
+              videoBaseHue = distinctHues[0]; // keep fallback
+          } else {
+              extractedVideoHues = [];
+          }
       }
+      hasVideoColor = extractedVideoHues.length > 0;
+    } else {
+      hasVideoColor = false;
+      extractedVideoHues = [];
     }
 
     // ── LED Screen Color Update ──────────────────────────
-    if (ledScreenMat && ledScreenMat.isShaderMaterial) {
+    if (ledScreenMat) {
        let kickFlash = beatState.isBeat ? 0.4 : 0;
        let reactiveIntensity = Math.min(1.0, energy * 0.8 + buildUp * 0.5 + kickFlash);
        
        let mixedIntensity = THREE.MathUtils.lerp(1.0, reactiveIntensity, CFG.screenReactivity);
        let targetIntensity = isSilent ? 0 : (mixedIntensity * CFG.screenBrightness);
        
-       ledScreenMat.uniforms.time.value = tAnim;
-       // Glitch driven by transient high frequencies + kick
-       ledScreenMat.uniforms.glitchIntensity.value = CFG.screenReactivity * ((beatState.isTransient ? high * 1.5 : 0) + (isSilent ? 0 : kickFlash * 0.8));
-       ledScreenMat.uniforms.brightness.value = targetIntensity;
-       
        if (videoObj) {
-           ledScreenMat.uniforms.hasTex.value = 1.0;
-       } else if (CFG.theme === 'dynamic' && section) {
-           ledScreenMat.uniforms.hasTex.value = 0.0;
-           // Lightness 0.5 yields a saturated rich color instead of pure white
-           let screenHex = hueToHex((section.baseHue + t * 50) % 360, 0.9, 0.5);
-           ledScreenMat.uniforms.baseColor.value.setHex(screenHex);
+           ledScreenMat.color.setScalar(targetIntensity);
        } else {
-           ledScreenMat.uniforms.hasTex.value = 0.0;
-           ledScreenMat.uniforms.baseColor.value.setRGB(bass, mid, high);
+           if (CFG.theme === 'dynamic') {
+               let baseH = section ? section.baseHue : (t * 50);
+               let screenHex = hueToHex((baseH + t * 60) % 360, 0.95, 0.5 * targetIntensity);
+               ledScreenMat.color.setHex(screenHex);
+           } else {
+               const cols = CFG.themes[CFG.theme];
+               if (cols && cols.length > 0) {
+                   const colorIdx = Math.floor(tAnim * 1.5) % cols.length;
+                   ledScreenMat.color.setHex(cols[colorIdx]);
+                   ledScreenMat.color.multiplyScalar(targetIntensity);
+               } else {
+                   ledScreenMat.color.setRGB(bass * targetIntensity, mid * targetIntensity, high * targetIntensity);
+               }
+           }
        }
     }
 
@@ -2632,9 +2909,18 @@ function animate() {
     const n = laserObjects.length;
     for (let i = 0; i < n; i++) {
       if (sectionLaserHues[i]  === undefined) sectionLaserHues[i]  = (i * 360 / n) % 360;
+      
+      // Override gracefully if video is loaded and themes are dynamic
+      if (hasVideoColor && CFG.theme === 'dynamic') {
+          targetSectionHues[i] = extractedVideoHues[i % extractedVideoHues.length];
+      }
+      
       if (targetSectionHues[i] === undefined) targetSectionHues[i] = sectionLaserHues[i];
       const dh = ((targetSectionHues[i] - sectionLaserHues[i] + 540) % 360) - 180;
-      sectionLaserHues[i] = (sectionLaserHues[i] + dh * 0.014 + 360) % 360;
+      
+      // If video is playing, lerp faster so colors adjust instantly with the visuals
+      const lerxSpeed = hasVideoColor ? 0.08 : 0.014;
+      sectionLaserHues[i] = (sectionLaserHues[i] + dh * lerxSpeed + 360) % 360;
     }
 
     // ── Real-time beat detection ──────────────────────────────────
@@ -2869,8 +3155,14 @@ function animate() {
         // RGB shift amount scales with kick/energy
         let shift = 0.0015 + (beatState.isBeat ? kick * 0.008 : 0) + (energy * 0.002);
         if (isPeakDrop) shift += Math.random() * 0.04; // Extreme visual glitch on drop
-        rgbShiftPass.uniforms['amount'].value = shift;
-        filmPass.uniforms['time'].value += 0.05 * CFG.speed * (isPeakDrop ? 4.0 : 1.0);
+        rgbShiftAmount.value = shift;
+        filmTimeUniform.value += 0.05 * CFG.speed * (isPeakDrop ? 4.0 : 1.0);
+    }
+
+    if (fxBlurEnabled) {
+        // Blur FX dynamisch rein an Bass/Energie koppeln (unabhängig vom Peak-Mode Flag)
+        let damp = 0.75 + (beatState.isBeat ? kick * 0.20 : 0) + (energy * 0.10);
+        afterImageDamp.value = Math.min(0.98, damp);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -2938,10 +3230,20 @@ function animate() {
       camera.position.add(camShake);
   }
 
-  composer.render();
+  // Render pipeline 
+  if (postProcessing) {
+      postProcessing.render();
+  } else {
+      renderer.render(scene, camera);
+  }
 }
 
-animate();
+try {
+    await renderer.init();
+} catch (e) {
+    console.error("WebGPU init failed", e);
+}
+renderer.setAnimationLoop(animate);
 
 // ─────────────────────────────────────────────
 //  PYRO UI LISTENERS
@@ -3255,8 +3557,30 @@ document.getElementById('btn-render').addEventListener('click', async () => {
 // ─────────────────────────────────────────────
 window.addEventListener('resize', () => {
   const W = window.innerWidth, H = window.innerHeight;
-  camera.aspect = W / H;
+  let renderW = W;
+  let renderH = H;
+  
+  if (typeof tiktokModeEnabled !== 'undefined' && tiktokModeEnabled) {
+      // 9:16 aspect ratio fitting inside window
+      const aspect = 9 / 16;
+      renderW = H * aspect;
+      renderH = H;
+      if (renderW > W) {
+          renderW = W;
+          renderH = W / aspect;
+      }
+      renderer.domElement.style.position = 'absolute';
+      renderer.domElement.style.left = '50%';
+      renderer.domElement.style.top = '50%';
+      renderer.domElement.style.transform = 'translate(-50%, -50%)';
+  } else {
+      renderer.domElement.style.position = 'static';
+      renderer.domElement.style.transform = 'none';
+      renderer.domElement.style.left = 'auto';
+      renderer.domElement.style.top = 'auto';
+  }
+
+  camera.aspect = renderW / renderH;
   camera.updateProjectionMatrix();
-  renderer.setSize(W, H);
-  composer.setSize(W, H);
+  renderer.setSize(renderW, renderH);
 });

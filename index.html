@@ -75,6 +75,13 @@
         <div class="controls-section-label">Formation &amp; Beams</div>
         <div class="controls-grid">
           <div class="control-group">
+            <label>Stage Size / Bühnengröße</label>
+            <select id="param-stage-size">
+              <option value="large" selected>🏟️ Festival (Groß)</option>
+              <option value="small">⬛ Club (Klein)</option>
+            </select>
+          </div>
+          <div class="control-group">
             <label>Formation / Placement</label>
             <select id="param-formation">
               <option value="front" selected>🟦 Front Trusses – Klassische Bühnenseite</option>
@@ -203,10 +210,13 @@
           </div>
         </div>
 
-        <div class="playback-controls">
+        <div class="playback-controls" style="display: flex; align-items: center; flex-wrap: wrap;">
           <button id="btn-play-pause" disabled>Play</button>
           <button id="btn-record" style="background-color: #aa2222; margin-left: 0.5rem; font-size: 0.8rem; padding: 0.6rem 1rem;">🔴 Record Video</button>
-          <button id="btn-render" disabled style="background-color: #551122; margin-left: 0.5rem; font-size: 0.8rem; padding: 0.6rem 1rem;">🎬 4K Export</button>
+          <label style="cursor:pointer; background-color: #ff007f; color: white; margin-left: 0.5rem; font-size: 0.8rem; padding: 0.5rem 0.8rem; border-radius: 4px; display:flex; align-items:center; gap: 5px;">
+            <input type="checkbox" id="param-tiktok" style="cursor: pointer; margin:0; accent-color: #ffb3d9;"> 📱 Auto-TikTok (9:16)
+          </label>
+          <button id="btn-render" disabled style="background-color: #551122; margin-left: 0.5rem; margin-top: 5px; font-size: 0.8rem; padding: 0.6rem 1rem;">🎬 4K Export</button>
         </div>
         
         <div class="audio-visualizer-container">
