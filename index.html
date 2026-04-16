@@ -218,7 +218,22 @@
           </label>
           <button id="btn-render" disabled style="background-color: #551122; margin-left: 0.5rem; margin-top: 5px; font-size: 0.8rem; padding: 0.6rem 1rem;">🎬 4K Export</button>
         </div>
-        
+
+        <!-- TikTok Start-Mode Selector (nur sichtbar wenn TikTok aktiv) -->
+        <div id="tiktok-startmode" style="display:none; background: rgba(255,0,127,0.12); border: 1px solid rgba(255,0,127,0.4); border-radius: 8px; padding: 0.5rem 0.8rem; margin-top: 0.4rem; font-size: 0.8rem;">
+          <div style="color: #ffb3d9; font-weight: 600; margin-bottom: 0.35rem;">📍 Recording Startpunkt</div>
+          <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <label style="cursor:pointer; display:flex; align-items:center; gap:5px; color:#fff;">
+              <input type="radio" name="tiktok-start" id="tiktok-start-drop" value="drop" checked style="accent-color:#ff007f; cursor:pointer;">
+              ⚡ 3s vor dem Drop (Auto)
+            </label>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:5px; color:#fff;">
+              <input type="radio" name="tiktok-start" id="tiktok-start-beginning" value="beginning" style="accent-color:#ff007f; cursor:pointer;">
+              ⏮️ Vom Anfang starten
+            </label>
+          </div>
+        </div>
+
         <div class="audio-visualizer-container">
             <canvas id="audio-visualizer" width="300" height="60"></canvas>
         </div>

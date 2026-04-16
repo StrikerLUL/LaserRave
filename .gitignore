@@ -22,14 +22,26 @@ lerna-debug.log*
 # Media / Song files (too large for GitHub)
 songs/
 
-# Test scripts
+# Test & debug scripts
 test-browser.cjs
 test_errors.mjs
+puppeteer-debug.mjs
+puppeteer-screenshot.mjs
+puppeteer-studio.mjs
+
+# Debug images
+debug.png
+debug2.png
 
 # Temp / scratch files
 danach
 macheww
 verbessere
+temp.txt
+
+# Internal planning / strategy docs
+TikTok_Strategie.md
+Zukunfts_Ideen.md
 
 # Editor directories
 .vscode/*

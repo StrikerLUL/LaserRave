@@ -151,19 +151,19 @@ let currentTvCamIdx = 0;
 let justCut = false;
 
 const tvCameras = [
-    { pos: new THREE.Vector3(0, 5, 25), look: new THREE.Vector3(0, 6, -10) },   // Front center wide
-    { pos: new THREE.Vector3(-20, 6, 12), look: new THREE.Vector3(5, 5, -12) }, // Side left low
-    { pos: new THREE.Vector3(20, 6, 12), look: new THREE.Vector3(-5, 5, -12) }, // Side right low
-    { pos: new THREE.Vector3(0, 30, 15), look: new THREE.Vector3(0, 5, -12) },  // High birds eye
-    { pos: new THREE.Vector3(-8, 2, -2), look: new THREE.Vector3(8, 12, -15) }, // DJ Booth left looking up
-    { pos: new THREE.Vector3(8, 2, -2), look: new THREE.Vector3(-8, 12, -15) }, // DJ Booth right looking up
-    { pos: new THREE.Vector3(0, 2, 5), look: new THREE.Vector3(0, 10, -15) },   // Crowd center looking up
-    { pos: new THREE.Vector3(-15, 15, -5), look: new THREE.Vector3(0, 2, -5) }, // Above stage left looking down
-    { pos: new THREE.Vector3(15, 15, -5), look: new THREE.Vector3(0, 2, -5) }   // Above stage right looking down
+    { pos: new THREE.Vector3(0, 8, 45), look: new THREE.Vector3(0, 10, -15) },   // Front center wide (TikTok safe, further back)
+    { pos: new THREE.Vector3(-18, 6, 30), look: new THREE.Vector3(0, 8, -15) },  // Side left deep, avoids direct beam paths
+    { pos: new THREE.Vector3(18, 6, 30), look: new THREE.Vector3(0, 8, -15) },   // Side right deep
+    { pos: new THREE.Vector3(0, 35, 28), look: new THREE.Vector3(0, 5, -15) },   // High birds eye pushed back
+    { pos: new THREE.Vector3(-12, 3, 15), look: new THREE.Vector3(4, 12, -20) }, // DJ Booth left but pushed back out of heavy lasers
+    { pos: new THREE.Vector3(12, 3, 15), look: new THREE.Vector3(-4, 12, -20) }, // DJ Booth right pushed back
+    { pos: new THREE.Vector3(0, 2, 35), look: new THREE.Vector3(0, 14, -15) },   // Far crowd center looking up (great for vertical aspect)
+    { pos: new THREE.Vector3(-22, 18, 5), look: new THREE.Vector3(0, 6, -15) },  // Panned left looking down
+    { pos: new THREE.Vector3(22, 18, 5), look: new THREE.Vector3(0, 6, -15) }    // Panned right looking down
 ];
 
-const baseCamPos = new THREE.Vector3(0, 8, 35);
-const baseCamTarget = new THREE.Vector3(0, 5, 0);
+const baseCamPos = new THREE.Vector3(0, 10, 45);
+const baseCamTarget = new THREE.Vector3(0, 6, 0);
 const autoCamFocus = new THREE.Vector3(0, 5, -10);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -206,7 +206,7 @@ const filmTimeUniform = uniform(0.0);
 const rgbShiftAmount  = uniform(0.0015);
 
 // Build the base chain: bloom on top of scene (boosted for intense laser glow)
-const bloomNode = bloom(sceneColor, 1.0, 0.6, 0.15);
+const bloomNode = bloom(sceneColor, 1.8, 0.75, 0.1);
 
 // Post-processing instance (use the canonical class name in this three/webgpu version)
 let postProcessing;
@@ -388,12 +388,12 @@ function buildStageEnvironment() {
 
 buildStageEnvironment();
 
-scene.add(new THREE.AmbientLight(0x222233, 1.8)); // Boosted ambient
-const stageLight = new THREE.PointLight(0x4444ff, 0.8, 100);
+scene.add(new THREE.AmbientLight(0x111118, 0.3)); // Much darker ambient for deeper blacks
+const stageLight = new THREE.PointLight(0x2233ff, 0.4, 100); // Reduced static stage light
 stageLight.position.set(0, 20, 0);
 scene.add(stageLight);
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 0.2);
+const sunLight = new THREE.DirectionalLight(0xffffff, 0.05); // Barely any sunlight
 sunLight.position.set(0, 50, 50);
 scene.add(sunLight);
 
@@ -1764,22 +1764,32 @@ function toggleRecording() {
     mediaRecorder.start();
     
     if (tiktokModeEnabled && songMap && songMap.sections.length > 0) {
-      // Find the highest energy section (main drop)
-      let peakSec = songMap.sections[0];
-      for(let s of songMap.sections) {
-          if (s.avgEnergy > peakSec.avgEnergy) peakSec = s;
-      }
-      // Allow 3 seconds build-up
-      const jumpTimeOffset = Math.max(0, peakSec.startTime - 3.0);
-      
-      // The user can now manually determine when to stop the recording.
-      if (playing) {
-          togglePlay(); // Stop current playback
-          playbackStartOffset = jumpTimeOffset;
-          togglePlay(); // Restart at drop
+      // Welcher Startmodus ist gewählt?
+      const startModeRadio = document.querySelector('input[name="tiktok-start"]:checked');
+      const startMode = startModeRadio ? startModeRadio.value : 'drop';
+
+      if (startMode === 'drop') {
+        // Find the highest energy section (main drop)
+        let peakSec = songMap.sections[0];
+        for(let s of songMap.sections) {
+            if (s.avgEnergy > peakSec.avgEnergy) peakSec = s;
+        }
+        // 3 Sekunden vor dem Drop starten
+        const jumpTimeOffset = Math.max(0, peakSec.startTime - 3.0);
+        
+        if (playing) {
+            togglePlay(); // Stop current playback
+            playbackStartOffset = jumpTimeOffset;
+            togglePlay(); // Restart at drop
+        } else {
+            playbackStartOffset = jumpTimeOffset;
+            togglePlay();
+        }
       } else {
-          playbackStartOffset = jumpTimeOffset;
-          togglePlay();
+        // Vom Anfang starten (startMode === 'beginning')
+        if (playing) togglePlay();
+        playbackStartOffset = 0;
+        togglePlay();
       }
     } else {
       if (!playing) togglePlay(); 
@@ -1907,9 +1917,14 @@ document.getElementById('param-fx-blur').addEventListener('change', e => {
   rebuildPostChain();
 });
 const paramTiktok = document.getElementById('param-tiktok');
+const tiktokStartModePanel = document.getElementById('tiktok-startmode');
 if (paramTiktok) {
   paramTiktok.addEventListener('change', e => {
     tiktokModeEnabled = e.target.checked;
+    // Start-Mode Panel einblenden/ausblenden
+    if (tiktokStartModePanel) {
+      tiktokStartModePanel.style.display = tiktokModeEnabled ? 'block' : 'none';
+    }
     window.dispatchEvent(new Event('resize')); 
   });
 }
