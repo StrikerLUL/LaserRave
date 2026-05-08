@@ -2040,10 +2040,6 @@ let t = 0;
 let dynamicBeatPhase = 0;
 let lastRawBeatPhase = 0;
 
-let _wQuat = null;
-let _wPos = null;
-let _wDir = null;
-
 function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPeakDrop, isSilent, buildUp) {
     if (!mhBaseIM) return;
     const count = movingHeadObjects.length;
