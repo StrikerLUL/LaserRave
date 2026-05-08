@@ -1362,7 +1362,6 @@ let videoTexture = null;
 const videoCanvas = document.createElement('canvas');
 videoCanvas.width = 16; videoCanvas.height = 16;
 const videoCtx = videoCanvas.getContext('2d', { willReadFrequently: true });
-let videoAvgColor = [255, 255, 255];
 let videoBaseHue = null;
 let extractedVideoHues = [];
 let lastVideoExtractT = 0;
