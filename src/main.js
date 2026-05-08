@@ -2468,7 +2468,6 @@ function animate() {
       rtEnergy = rtBass * 0.5 + rtMid * 0.3 + rtHigh * 0.2;
   }
   const isSilent = playing ? (rtEnergy < 0.04) : true;
-  const isIdleDarkness = isSilent && !playing; // Only full silence if effectively playing music but paused
 
   // ── Song-map frame lookup (Stems) ────────────────────────────
   const frame   = playing ? getSongFrame()      : null;
