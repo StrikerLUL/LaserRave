@@ -2819,9 +2819,6 @@ function animate() {
         controls.enabled = true;
     }
 
-    const buLit = 0.56 + buildUp * 0.22;
-    const buSat = 1.0  - buildUp * 0.25;
-
     // ── Moving Heads Update ──────────────────────────────────────
     if (movingHeadsEnabled || currentMode === 'studio') {
         updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPeakDrop, isSilent, buildUp);
