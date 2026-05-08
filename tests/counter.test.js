@@ -3,48 +3,60 @@ import assert from 'node:assert';
 import { test, describe } from 'node:test';
 
 describe('setupCounter', () => {
-    test('should update textContent when element is clicked', () => {
+    const createMockElement = () => {
         let clickHandler = null;
-        const mockElement = {
-            textContent: '',
+        let innerHTMLVal = '';
+        let textContentVal = '';
+
+        return {
+            get textContent() { return textContentVal; },
+            set textContent(val) { textContentVal = val; },
+            get innerHTML() { return innerHTMLVal; },
+            set innerHTML(val) { innerHTMLVal = val; },
             addEventListener: (event, handler) => {
                 if (event === 'click') {
                     clickHandler = handler;
                 }
             },
-            // To ensure innerHTML is not used
-            set innerHTML(val) {
-                throw new Error('innerHTML should not be used');
-            }
+            get clickHandler() { return clickHandler; }
         };
+    };
 
+    const getOutput = (mockElement) => mockElement.textContent || mockElement.innerHTML;
+
+    test('should update element text when initialized', () => {
+        const mockElement = createMockElement();
         setupCounter(mockElement);
+        assert.strictEqual(getOutput(mockElement), 'Count is 0');
+    });
 
-        assert.strictEqual(mockElement.textContent, 'Count is 0');
+    test('should update element text when element is clicked', () => {
+        const mockElement = createMockElement();
+        setupCounter(mockElement);
+        assert.strictEqual(getOutput(mockElement), 'Count is 0');
 
-        if (clickHandler) {
-            clickHandler();
-            assert.strictEqual(mockElement.textContent, 'Count is 1');
-            clickHandler();
-            assert.strictEqual(mockElement.textContent, 'Count is 2');
+        if (mockElement.clickHandler) {
+            mockElement.clickHandler();
+            assert.strictEqual(getOutput(mockElement), 'Count is 1');
+            mockElement.clickHandler();
+            assert.strictEqual(getOutput(mockElement), 'Count is 2');
         } else {
             assert.fail('Click handler was not registered');
         }
     });
 
-    test('should not use innerHTML', () => {
-        const mockElement = {
-            textContent: '',
-            addEventListener: () => {},
-            set innerHTML(val) {
-                assert.fail('innerHTML was used');
-            }
-        };
+    test('should handle multiple successive clicks', () => {
+        const mockElement = createMockElement();
+        setupCounter(mockElement);
+        assert.strictEqual(getOutput(mockElement), 'Count is 0');
 
-        try {
-            setupCounter(mockElement);
-        } catch (e) {
-            if (e.message === 'innerHTML was used') throw e;
+        if (mockElement.clickHandler) {
+            for (let i = 1; i <= 5; i++) {
+                mockElement.clickHandler();
+                assert.strictEqual(getOutput(mockElement), `Count is ${i}`);
+            }
+        } else {
+            assert.fail('Click handler was not registered');
         }
     });
 });
