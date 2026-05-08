@@ -1891,8 +1891,6 @@ function detectTransient(high) {
   return high > Math.max(avg * 1.7, 0.18);
 }
 
-const PATTERNS = ['fan', 'xcross', 'scatter', 'wave', 'strobe', 'sidesweep', 'salvo', 'tunnel', 'sine', 'chase', 'chase-fast', 'sparkle', 'pulse', 'zigzag'];
-
 // ─────────────────────────────────────────────
 //  SONG TIMELINE RENDERER
 // ─────────────────────────────────────────────
