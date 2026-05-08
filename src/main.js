@@ -10,6 +10,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 // Removed Reflector due to WebGPU incompatibility
 
+import { computeFormationPositions } from './utils/formations.js';
+
 // Procedural Lens Flare Texture Generator
 function createFlareTexture() {
     const canvas = document.createElement('canvas');
@@ -88,14 +90,16 @@ const CFG = {
 let mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM;
 let laserBodyIM, laserCoreIM, laserTubeIM;
 const dummy = new THREE.Object3D(); // Reused helper – never allocate inside loops!
-// Pre-allocated colour objects to avoid per-frame GC pressure at 200+ instances
+// Pre-allocated objects to avoid per-frame GC pressure
 const _col1 = new THREE.Color();
 const _col2 = new THREE.Color();
 const _white = new THREE.Color(0xffffff);
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
 const _camShake = new THREE.Vector3();
-const _curlTarget = { x: 0, y: 0, z: 0 };
+const _targetPos = new THREE.Vector3();
+const _lookTarget = new THREE.Vector3();
 
 
 let currentMode = 'live'; // 'live' or 'studio'
@@ -403,45 +407,11 @@ scene.add(sunLight);
 
 
 // ─────────────────────────────────────────────
-//  PYROTECHNIK SYSTEM (Fluid Dynamics)
+//  PYROTECHNIK SYSTEM (Offloaded to Worker)
 // ─────────────────────────────────────────────
 
-// Curl Noise helpers (divergence-free turbulent velocity field)
-function _hash(n) { return Math.sin(n) * 43758.5453123; }
-function _grad(ix, iy, iz, x, y, z) {
-    const h = (_hash(ix + _hash(iy + _hash(iz))) * 0.5 + 0.5) % 1.0;
-    const angle = h * Math.PI * 2;
-    const angle2 = (_hash(ix * 2.1 + iy * 3.7 + iz) * 0.5 + 0.5) * Math.PI;
-    return (x - ix) * Math.cos(angle) * Math.sin(angle2)
-         + (y - iy) * Math.sin(angle) * Math.sin(angle2)
-         + (z - iz) * Math.cos(angle2);
-}
-function _perlin(x, y, z) {
-    const X = Math.floor(x), Y = Math.floor(y), Z = Math.floor(z);
-    const u = x - X, v = y - Y, w = z - Z;
-    const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
-    const fu = fade(u), fv = fade(v), fw = fade(w);
-    const lerp = (a, b, t) => a + t * (b - a);
-    return lerp(lerp(lerp(_grad(X,Y,Z,x,y,z),_grad(X+1,Y,Z,x,y,z),fu),
-                     lerp(_grad(X,Y+1,Z,x,y,z),_grad(X+1,Y+1,Z,x,y,z),fu),fv),
-                lerp(lerp(_grad(X,Y,Z+1,x,y,z),_grad(X+1,Y,Z+1,x,y,z),fu),
-                     lerp(_grad(X,Y+1,Z+1,x,y,z),_grad(X+1,Y+1,Z+1,x,y,z),fu),fv),fw);
-}
-// Curl noise: Nabla x F, gives a divergence-free vector field
-function curlNoise(x, y, z, t_offset, target = { x: 0, y: 0, z: 0 }) {
-    const eps = 0.1;
-    const n = (a, b, c) => _perlin(a, b, c + t_offset);
-    const dFzdx = (n(x+eps,y,z) - n(x-eps,y,z)) / (2*eps);
-    const dFydz = (n(x,y,z+eps) - n(x,y,z-eps)) / (2*eps);
-    const dFxdz = (n(x,y,z+eps) - n(x,y,z-eps)) / (2*eps);
-    const dFzdz2= (n(x,y+eps,z) - n(x,y-eps,z)) / (2*eps);
-    const dFydx = (n(x+eps,y,z) - n(x-eps,y,z)) / (2*eps);
-    const dFxdy = (n(x,y+eps,z) - n(x,y-eps,z)) / (2*eps);
-    target.x = dFzdz2 - dFydz;
-    target.y = dFxdz  - dFzdx;
-    target.z = dFydx  - dFxdy;
-    return target;
-}
+const pyroWorker = new Worker(new URL('./pyro-worker.js', import.meta.url));
+let pyroSystemIdCounter = 0;
 
 // Generate a circular glowing texture for particles to replace the old ShaderMaterial logic
 const particleCanvas = document.createElement('canvas');
@@ -478,32 +448,10 @@ const sparkMaterial = new THREE.PointsMaterial({
 
 class PyroSystem {
     constructor({ x, y, z, type = 'flame', maxParticles = 15000, emitDir = {x:0,y:1,z:0}, spread = 0.4 }) {
-        this.originX = x; this.originY = y; this.originZ = z;
-        this.type = type; // 'flame' | 'spark'
+        this.id = pyroSystemIdCounter++;
         this.maxParticles = maxParticles;
-        this.emitDir = emitDir;
-        this.spread = spread;
-        this.active = true;
-        this.emitAccum = 0;
+        this.isUpdating = false;
 
-        // Per-particle buffers
-        this.px = new Float32Array(maxParticles);
-        this.py = new Float32Array(maxParticles);
-        this.pz = new Float32Array(maxParticles);
-        this.vx = new Float32Array(maxParticles);
-        this.vy = new Float32Array(maxParticles);
-        this.vz = new Float32Array(maxParticles);
-        this.age      = new Float32Array(maxParticles);
-        this.lifetime = new Float32Array(maxParticles);
-        this.size     = new Float32Array(maxParticles);
-        this.cr = new Float32Array(maxParticles);
-        this.cg = new Float32Array(maxParticles);
-        this.cb = new Float32Array(maxParticles);
-        this.alive = new Uint8Array(maxParticles);
-        this._nextSpawnIndex = 0;
-        this.count = 0;
-
-        // Three.js geometry & points object
         this.geo = new THREE.BufferGeometry();
         const n = maxParticles;
         this.posAttr   = new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
@@ -523,163 +471,60 @@ class PyroSystem {
         this.points.frustumCulled = false;
         scene.add(this.points);
 
-        this.burstIntensity = 0; // 0 to 1
-    }
+        pyroWorker.postMessage({
+            type: 'init',
+            id: this.id,
+            config: { x, y, z, type, maxParticles, emitDir, spread }
+        });
 
-    _spawnOne(energy, bass, isPeak) {
-        // Find a dead slot efficiently
-        let idx = -1;
-        for (let i = 0; i < this.maxParticles; i++) {
-            let chk = (this._nextSpawnIndex + i) % this.maxParticles;
-            if (!this.alive[chk]) { 
-                idx = chk; 
-                this._nextSpawnIndex = (chk + 1) % this.maxParticles;
-                break; 
+        this.onWorkerMessage = (e) => {
+            const { type, id, posArray, ageArray, ltArray, sizeArray, colorArray } = e.data;
+            if (type === 'updated' && id === this.id) {
+                this.posAttr.array = posArray;
+                this.ageAttr.array = ageArray;
+                this.ltAttr.array = ltArray;
+                this.sizeAttr.array = sizeArray;
+                this.colorAttr.array = colorArray;
+
+                this.posAttr.needsUpdate = true;
+                this.ageAttr.needsUpdate = true;
+                this.ltAttr.needsUpdate = true;
+                this.sizeAttr.needsUpdate = true;
+                this.colorAttr.needsUpdate = true;
+                this.geo.setDrawRange(0, this.maxParticles);
+                this.isUpdating = false;
             }
-        }
-        if (idx === -1) return;
+        };
 
-        this.alive[idx] = 1;
-        // Random jitter around origin
-        this.px[idx] = this.originX + (Math.random() - 0.5) * 0.4;
-        this.py[idx] = this.originY;
-        this.pz[idx] = this.originZ + (Math.random() - 0.5) * 0.4;
-
-        // Scale power based on burst
-        const power = 0.5 + this.burstIntensity * 0.5 + (isPeak ? 0.5 : 0);
-
-        // Initial velocity = emitDir + spread noise
-        const spd = this.type === 'flame'
-            ? (1.5 + Math.random() * 2.0 + bass * 5.0) * power
-            : (3.0 + Math.random() * 5.0 + energy * 8.0) * power;
-            
-        this.vx[idx] = (this.emitDir.x * spd + (Math.random() - 0.5) * this.spread * spd);
-        this.vy[idx] = (this.emitDir.y * spd + (Math.random() - 0.5) * this.spread * spd * 0.5);
-        this.vz[idx] = (this.emitDir.z * spd + (Math.random() - 0.5) * this.spread * spd);
-
-        this.age[idx] = 0;
-        this.lifetime[idx] = this.type === 'flame'
-            ? (0.6 + Math.random() * 1.2) * (0.8 + power * 0.4)
-            : (0.3 + Math.random() * 0.7) * (0.8 + power * 0.4);
-            
-        this.size[idx] = this.type === 'flame'
-            ? (0.6 + Math.random() * 1.5) * power
-            : (0.2 + Math.random() * 0.4) * power;
+        pyroWorker.addEventListener('message', this.onWorkerMessage);
     }
 
     update(dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak) {
-        // Burst triggering logic
-        const triggerThreshold = 0.65;
-        if (isPeak || energy > triggerThreshold || kick > 0.8) {
-            const targetBurst = isPeak ? 1.0 : (energy > triggerThreshold ? 0.7 : 0.4);
-            this.burstIntensity = Math.max(this.burstIntensity, targetBurst);
-        }
-        // Smooth decay
-        this.burstIntensity *= Math.pow(0.94, dt * 60);
+        if (this.isUpdating) return;
+        this.isUpdating = true;
 
-        // Update Shader Time uniform
-        if (this.points.material.uniforms && this.points.material.uniforms.uTime) {
-            this.points.material.uniforms.uTime.value = globalT;
-        }
+        const posArray = this.posAttr.array;
+        const ageArray = this.ageAttr.array;
+        const ltArray = this.ltAttr.array;
+        const sizeArray = this.sizeAttr.array;
+        const colorArray = this.colorAttr.array;
 
-        const turbulenceStr = 0.8 + energy * 1.5 + this.burstIntensity * 2.0;
-        const thermalStr    = 1.2 + energy * 2.0 + this.burstIntensity * 3.0;
-
-        // Emit new particles (only if burst is active or high energy)
-        const effectiveIntensity = Math.max(this.burstIntensity, energy * 0.5) * pyroIntensity;
-        
-        const emitRateMultiplier = 25.0; // SCALE UP PARTICLE EMISSION FOR 15,000 count
-        const emitRate = this.type === 'flame'
-            ? (bass * 150 + (isPeak ? 200 : 0)) * effectiveIntensity * emitRateMultiplier
-            : (energy * 100 + (isPeak ? 150 : 0)) * effectiveIntensity * emitRateMultiplier;
-            
-        this.emitAccum += emitRate * dt;
-        while (this.emitAccum >= 1) {
-            this._spawnOne(energy, bass, isPeak);
-            this.emitAccum -= 1;
-        }
-
-        // Update particles
-        let aliveCount = 0;
-        for (let i = 0; i < this.maxParticles; i++) {
-            const i3 = i * 3;
-            if (!this.alive[i]) {
-                this.sizeAttr.array[i] = 0;
-                continue;
+        pyroWorker.postMessage({
+            type: 'update',
+            id: this.id,
+            data: {
+                dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak,
+                posArray, ageArray, ltArray, sizeArray, colorArray
             }
-
-            this.age[i] += dt;
-            if (this.age[i] >= this.lifetime[i]) { 
-                this.alive[i] = 0; 
-                this.sizeAttr.array[i] = 0;
-                continue; 
-            }
-
-            const life = 1.0 - this.age[i] / this.lifetime[i];
-            const nx = this.px[i] * 0.3, ny = this.py[i] * 0.3, nz = this.pz[i] * 0.3;
-            const curl = curlNoise(nx, ny, nz, globalT * 0.5, _curlTarget);
-
-            // Physics integration
-            this.vx[i] += curl.x * turbulenceStr * dt + windX * 0.04 * dt;
-            this.vy[i] += curl.y * turbulenceStr * dt + thermalStr * life * dt + windY * 0.02 * dt;
-            this.vz[i] += curl.z * turbulenceStr * dt;
-
-            if (this.type === 'spark') {
-                this.vy[i] -= 6.0 * dt; // Gravity
-            }
-
-            // Drag
-            const drag = this.type === 'flame' ? 0.96 : 0.94;
-            this.vx[i] *= drag; this.vy[i] *= drag; this.vz[i] *= drag;
-
-            this.px[i] += this.vx[i] * dt;
-            this.py[i] += this.vy[i] * dt;
-            this.pz[i] += this.vz[i] * dt;
-
-            // Color ramp
-            if (this.type === 'flame') {
-                if (life > 0.75) {
-                    this.cr[i] = 1.0; this.cg[i] = 1.0; this.cb[i] = 0.8;
-                } else if (life > 0.5) {
-                    const lRel = (life - 0.5) / 0.25;
-                    this.cr[i] = 1.0; this.cg[i] = 0.5 + lRel * 0.5; this.cb[i] = lRel * 0.8;
-                } else if (life > 0.25) {
-                    const lRel = (life - 0.25) / 0.25;
-                    this.cr[i] = 1.0; this.cg[i] = 0.1 + lRel * 0.4; this.cb[i] = 0.0;
-                } else {
-                    const lRel = life / 0.25;
-                    this.cr[i] = 0.3 + lRel * 0.7; this.cg[i] = 0.0; this.cb[i] = 0.0;
-                }
-            } else {
-                this.cr[i] = 1.0;
-                this.cg[i] = 0.6 + life * 0.4;
-                this.cb[i] = life * 0.3;
-            }
-
-            // Update GPU buffers
-            this.posAttr.array[i3]   = this.px[i];
-            this.posAttr.array[i3+1] = this.py[i];
-            this.posAttr.array[i3+2] = this.pz[i];
-            this.ageAttr.array[i]    = this.age[i];
-            this.ltAttr.array[i]     = this.lifetime[i];
-            this.sizeAttr.array[i]   = this.size[i] * life;
-            this.colorAttr.array[i3]  = this.cr[i];
-            this.colorAttr.array[i3+1]= this.cg[i];
-            this.colorAttr.array[i3+2]= this.cb[i];
-            aliveCount++;
-        }
-
-        this.posAttr.needsUpdate   = true;
-        this.ageAttr.needsUpdate   = true;
-        this.ltAttr.needsUpdate    = true;
-        this.sizeAttr.needsUpdate  = true;
-        this.colorAttr.needsUpdate = true;
-        this.geo.setDrawRange(0, this.maxParticles);
+        }, [posArray.buffer, ageArray.buffer, ltArray.buffer, sizeArray.buffer, colorArray.buffer]);
     }
 
     dispose() {
+        pyroWorker.removeEventListener('message', this.onWorkerMessage);
+        pyroWorker.postMessage({ type: 'dispose', id: this.id });
         scene.remove(this.points);
         this.geo.dispose();
+        if (this.points.material) this.points.material.dispose();
     }
 }
 
@@ -764,50 +609,89 @@ function computeFormation(count, formation) {
   return pos;
 }
 
+const sharedGeos = new Map();
+const sharedMats = new Map();
+
+function getSharedGeo(id, creator) {
+    if (!sharedGeos.has(id)) sharedGeos.set(id, creator());
+    return sharedGeos.get(id);
+}
+
+function getSharedMat(id, creator) {
+    if (!sharedMats.has(id)) sharedMats.set(id, creator());
+    return sharedMats.get(id);
+}
+
 function setupMovingHeadIM(count) {
     if (mhBaseIM) {
+        if (mhBaseIM.count >= count) {
+            mhBaseIM.count = count;
+            mhYokeIM.count = count;
+            mhHeadIM.count = count;
+            mhCoreIM.count = count;
+            mhWashIM.count = count;
+            return;
+        }
         scene.remove(mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM);
-        [mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM].forEach(im => { im.geometry.dispose(); im.material.dispose(); });
+        [mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM].forEach(im => {
+            im.instanceMatrix.dispose();
+            if (im.instanceColor) im.instanceColor.dispose();
+        });
     }
 
-    const baseGeo = new THREE.BoxGeometry(1.2, 0.8, 1.2);
-    baseGeo.translate(0, 0.4, 0);
+    const baseGeo = getSharedGeo('mhBase', () => {
+        const g = new THREE.BoxGeometry(1.2, 0.8, 1.2);
+        g.translate(0, 0.4, 0);
+        return g;
+    });
     mhBaseIM = new THREE.InstancedMesh(baseGeo,
-        new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 }), count);
+        getSharedMat('mhBase', () => new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 })), count);
 
-    const yokeGeo = new THREE.BoxGeometry(1.6, 0.25, 0.25);
-    yokeGeo.translate(0, 0.55, 0);
+    const yokeGeo = getSharedGeo('mhYoke', () => {
+        const g = new THREE.BoxGeometry(1.6, 0.25, 0.25);
+        g.translate(0, 0.55, 0);
+        return g;
+    });
     mhYokeIM = new THREE.InstancedMesh(yokeGeo,
-        new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 }), count);
+        getSharedMat('mhYoke', () => new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 })), count);
 
     // Head: cylinder lying sideways (along X) so rotation around X = tilt
-    const headGeo = new THREE.CylinderGeometry(0.45, 0.45, 1.0, 12);
-    headGeo.rotateZ(Math.PI / 2); // now axis lies along X
+    const headGeo = getSharedGeo('mhHead', () => {
+        const g = new THREE.CylinderGeometry(0.45, 0.45, 1.0, 12);
+        g.rotateZ(Math.PI / 2); // now axis lies along X
+        return g;
+    });
     mhHeadIM = new THREE.InstancedMesh(headGeo,
-        new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7 }), count);
+        getSharedMat('mhHead', () => new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7 })), count);
 
     // Beam cone: tip at origin, opens downward along -Y, then rotated so -Y becomes the beam axis.
     // The cone starts long-axis along +Y; after rotateX(-PI/2) it points in +Z (toward audience).
     // A tiltAngle > 0 around X will then sweep the beam downward (-Y) → toward the floor below the fixtures.
     const beamLen = 45;
-    const coneGeo = new THREE.CylinderGeometry(5.5, 0.08, beamLen, 14, 1, true);
-    coneGeo.translate(0, -beamLen / 2, 0); // tip at y=0, base at y=-beamLen
-    coneGeo.rotateX(-Math.PI / 2);          // now: tip at origin, base at z=+beamLen (toward audience)
-    mhCoreIM = new THREE.InstancedMesh(coneGeo, new THREE.MeshBasicMaterial({
+    const coneGeo = getSharedGeo('mhCore', () => {
+        const g = new THREE.CylinderGeometry(5.5, 0.08, beamLen, 14, 1, true);
+        g.translate(0, -beamLen / 2, 0); // tip at y=0, base at y=-beamLen
+        g.rotateX(-Math.PI / 2);          // now: tip at origin, base at z=+beamLen (toward audience)
+        return g;
+    });
+    mhCoreIM = new THREE.InstancedMesh(coneGeo, getSharedMat('mhCore', () => new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true, opacity: 0.02 + CFG.hazeDensity * 0.06,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
         alphaMap: globalGoboTexture
-    }), count);
+    })), count);
 
-    const washGeo = new THREE.CylinderGeometry(16.0, 0.08, beamLen, 12, 1, true);
-    washGeo.translate(0, -beamLen / 2, 0);
-    washGeo.rotateX(-Math.PI / 2);
-    mhWashIM = new THREE.InstancedMesh(washGeo, new THREE.MeshBasicMaterial({
+    const washGeo = getSharedGeo('mhWash', () => {
+        const g = new THREE.CylinderGeometry(16.0, 0.08, beamLen, 12, 1, true);
+        g.translate(0, -beamLen / 2, 0);
+        g.rotateX(-Math.PI / 2);
+        return g;
+    });
+    mhWashIM = new THREE.InstancedMesh(washGeo, getSharedMat('mhWash', () => new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true, opacity: CFG.hazeDensity * 0.02,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
-    }), count);
+    })), count);
 
     [mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM].forEach(im => {
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -868,7 +752,7 @@ function initMovingHeads(count = CFG.movingHeadCount) {
                 pos: proxy.position,
                 proxy,
                 intensity: 1.0,
-                color: new THREE.Color(0xffffff),
+                color: _white.clone(),
                 headState: { panVel: 0, tiltVel: 0, adsrState: 0, pan: 0, tilt: Math.PI * 0.28 }
                 //  tilt > 0 → beam sweeps downward toward floor (correct for overhead fixtures)
             });
@@ -879,32 +763,47 @@ function initMovingHeads(count = CFG.movingHeadCount) {
 /** Setup Instanced Meshes for Lasers */
 function setupLaserIM(count) {
     if (laserBodyIM) {
+        if (laserBodyIM.count >= count) {
+            laserBodyIM.count = count;
+            laserCoreIM.count = count;
+            laserTubeIM.count = count;
+            return;
+        }
         scene.remove(laserBodyIM, laserCoreIM, laserTubeIM);
-        [laserBodyIM, laserCoreIM, laserTubeIM].forEach(im => { im.geometry.dispose(); im.material.dispose(); });
+        [laserBodyIM, laserCoreIM, laserTubeIM].forEach(im => {
+            im.instanceMatrix.dispose();
+            if (im.instanceColor) im.instanceColor.dispose();
+        });
     }
 
     // Housing box
-    const bodyGeo = new THREE.BoxGeometry(0.55, 0.55, 0.75);
+    const bodyGeo = getSharedGeo('laserBody', () => new THREE.BoxGeometry(0.55, 0.55, 0.75));
     laserBodyIM = new THREE.InstancedMesh(bodyGeo,
-        new THREE.MeshStandardMaterial({ color: 0x1a1a2e, metalness: 0.95, roughness: 0.15 }), count);
+        getSharedMat('laserBody', () => new THREE.MeshStandardMaterial({ color: 0x1a1a2e, metalness: 0.95, roughness: 0.15 })), count);
 
     // Beam: thin cylinder, axis along +Y, translated then rotated so it shoots toward +Z (audience)
     const beamLen = 65;
-    const coreGeo = new THREE.CylinderGeometry(0.12, 0.12, beamLen, 8, 1, true);
-    coreGeo.translate(0, beamLen / 2, 0);
-    coreGeo.rotateX(Math.PI / 2); // now shoots along +Z
-    laserCoreIM = new THREE.InstancedMesh(coreGeo, new THREE.MeshBasicMaterial({
+    const coreGeo = getSharedGeo('laserCore', () => {
+        const g = new THREE.CylinderGeometry(0.12, 0.12, beamLen, 8, 1, true);
+        g.translate(0, beamLen / 2, 0);
+        g.rotateX(Math.PI / 2); // now shoots along +Z
+        return g;
+    });
+    laserCoreIM = new THREE.InstancedMesh(coreGeo, getSharedMat('laserCore', () => new THREE.MeshBasicMaterial({
         color: 0xffffff, transparent: true, opacity: 0.1 + CFG.hazeDensity * 0.3,
         blending: THREE.AdditiveBlending, depthWrite: false
-    }), count);
+    })), count);
 
-    const tubeGeo = new THREE.CylinderGeometry(0.22, 0.0, beamLen, 8, 1, true);
-    tubeGeo.translate(0, beamLen / 2, 0);
-    tubeGeo.rotateX(Math.PI / 2);
-    laserTubeIM = new THREE.InstancedMesh(tubeGeo, new THREE.MeshBasicMaterial({
+    const tubeGeo = getSharedGeo('laserTube', () => {
+        const g = new THREE.CylinderGeometry(0.22, 0.0, beamLen, 8, 1, true);
+        g.translate(0, beamLen / 2, 0);
+        g.rotateX(Math.PI / 2);
+        return g;
+    });
+    laserTubeIM = new THREE.InstancedMesh(tubeGeo, getSharedMat('laserTube', () => new THREE.MeshBasicMaterial({
         color: 0xffffff, transparent: true, opacity: CFG.hazeDensity * 0.15,
         blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false
-    }), count);
+    })), count);
 
     [laserBodyIM, laserCoreIM, laserTubeIM].forEach(im => {
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -922,184 +821,6 @@ function setupLaserIM(count) {
 }
 
 // ─── Formation Presets ────────────────────────────────────────────────────────
-// Returns [{x, y, z, baseYaw, zone, wallNorm}] — one entry per laser slot.
-// baseYaw = base Y-rotation so the beam faces the dance floor regardless of position.
-// zone    = which part of the stage ('front'|'side-left'|'side-right'|'corner'|'diagonal')
-// wallNorm= normalized position [0..1] along the fixture's own truss/wall row → used for wave/chase patterns
-function computeFormationPositions(count, formation) {
-    const slots = [];
-
-    // helpers
-    const spread = (n, xMin, xMax) =>
-        n > 1 ? Array.from({length: n}, (_, i) => xMin + i * (xMax - xMin) / (n - 1)) : [0];
-    const zSpread = (n, zMin, zMax) =>
-        n > 1 ? Array.from({length: n}, (_, i) => zMin + i * (zMax - zMin) / (n - 1)) : [(zMin + zMax) / 2];
-
-    switch (formation) {
-
-        case 'twin': {
-            // Two clean parallel front trusses
-            const half = Math.floor(count / 2), rem = count - half;
-            spread(half, -56, 56).forEach((x, i) =>
-                slots.push({ x, y: 17, z: -26, baseYaw: 0, zone: 'front', wallNorm: i / Math.max(half - 1, 1) }));
-            spread(rem,  -56, 56).forEach((x, i) =>
-                slots.push({ x, y: 11, z: -19, baseYaw: 0, zone: 'front', wallNorm: i / Math.max(rem - 1, 1) }));
-            break;
-        }
-
-        case 'sides': {
-            // Lasers mounted on left & right walls, beams shooting INWARD across the dance floor
-            const half = Math.floor(count / 2), rem = count - half;
-            const sideRows = [8, 13, 18];
-            const genSide = (n, xPos, yaw, zone) => {
-                const perRow2 = Math.ceil(n / sideRows.length);
-                for (let i = 0; i < n; i++) {
-                    const ri  = Math.min(Math.floor(i / perRow2), sideRows.length - 1);
-                    const col = i % perRow2;
-                    const wn  = col / Math.max(perRow2 - 1, 1);
-                    const z   = -30 + wn * 32; // z: back-of-stage to audience area
-                    slots.push({ x: xPos, y: sideRows[ri], z, baseYaw: yaw, zone, wallNorm: wn });
-                }
-            };
-            genSide(half, -63,  Math.PI / 2, 'side-left');   // left wall → beams fire right (+X)
-            genSide(rem,   63, -Math.PI / 2, 'side-right');   // right wall → beams fire left (−X)
-            break;
-        }
-
-        case 'surround': {
-            // Front rows (55%) + side walls (45%)
-            const nFront = Math.round(count * 0.55), nSides = count - nFront;
-            const rows = [{ y: 16.5, z: -25 }, { y: 11, z: -19 }];
-            const perRow2 = Math.ceil(nFront / rows.length);
-            for (let i = 0; i < nFront; i++) {
-                const row = rows[Math.min(Math.floor(i / perRow2), rows.length - 1)];
-                const col = i % perRow2, wn = col / Math.max(perRow2 - 1, 1);
-                slots.push({ x: -56 + wn * 112, y: row.y, z: row.z, baseYaw: 0, zone: 'front', wallNorm: wn });
-            }
-            const sPerSide = Math.floor(nSides / 2), sideRows = [9, 14];
-            const genS = (n, xPos, yaw, zone) => {
-                const psr = Math.ceil(n / sideRows.length);
-                for (let i = 0; i < n; i++) {
-                    const ri = Math.min(Math.floor(i / psr), sideRows.length - 1);
-                    const col = i % psr, wn = col / Math.max(psr - 1, 1);
-                    slots.push({ x: xPos, y: sideRows[ri], z: -28 + wn * 30, baseYaw: yaw, zone, wallNorm: wn });
-                }
-            };
-            genS(sPerSide,       -63,  Math.PI / 2, 'side-left');
-            genS(nSides - sPerSide, 63, -Math.PI / 2, 'side-right');
-            break;
-        }
-
-        case 'corners': {
-            // 4 corner towers, each pointing at center-stage
-            const corners = [
-                { x: -58, z: -30, zone: 'corner' }, { x:  58, z: -30, zone: 'corner' },
-                { x: -58, z:   4, zone: 'corner' }, { x:  58, z:   4, zone: 'corner' },
-            ];
-            const perC = Math.floor(count / corners.length);
-            corners.forEach((c, ci) => {
-                const n = ci < corners.length - 1 ? perC : count - ci * perC;
-                const yaw = Math.atan2(-c.x, -c.z - 13); // aim toward (0,−,−13)
-                for (let j = 0; j < n; j++) {
-                    const wn = j / Math.max(n - 1, 1);
-                    slots.push({ x: c.x, y: 8 + wn * 10, z: c.z, baseYaw: yaw, zone: c.zone, wallNorm: wn });
-                }
-            });
-            break;
-        }
-
-        case 'aerial': {
-            // Multi-angle: front 35% + sides 40% + diagonal back-sides 25%
-            const nF = Math.round(count * 0.35), nS = Math.round(count * 0.40), nD = count - nF - nS;
-            const aerRows = [{ y: 17, z: -26 }, { y: 11, z: -19 }];
-            const pFR = Math.ceil(nF / aerRows.length);
-            for (let i = 0; i < nF; i++) {
-                const row = aerRows[Math.min(Math.floor(i / pFR), aerRows.length - 1)];
-                const col = i % pFR, wn = col / Math.max(pFR - 1, 1);
-                slots.push({ x: -55 + wn * 110, y: row.y, z: row.z, baseYaw: 0, zone: 'front', wallNorm: wn });
-            }
-            const pSide = Math.floor(nS / 2);
-            zSpread(pSide, -28, 4).forEach((z, i) => slots.push({ x: -63, y: 9 + (i % 3) * 4.5, z, baseYaw: Math.PI / 2 - 0.2, zone: 'side-left', wallNorm: i / Math.max(pSide - 1, 1) }));
-            zSpread(nS - pSide, -28, 4).forEach((z, i) => slots.push({ x: 63, y: 9 + (i % 3) * 4.5, z, baseYaw: -(Math.PI / 2 - 0.2), zone: 'side-right', wallNorm: i / Math.max(nS - pSide - 1, 1) }));
-            for (let i = 0; i < nD; i++) {
-                const side = i % 2 === 0 ? -1 : 1;
-                const x = side * (38 + Math.floor(i / 2) * 7);
-                slots.push({ x, y: 18, z: -28, baseYaw: Math.atan2(-x * 0.7, 13), zone: 'diagonal', wallNorm: i / Math.max(nD - 1, 1) });
-            }
-            break;
-        }
-
-        case 'front': default: {
-            // 4 front trusses spanning full stage width
-            const rows = [{ y: 18, z: -28 }, { y: 14, z: -24 }, { y: 11, z: -20 }, { y: 7.5, z: -16 }];
-            const perRow2 = Math.ceil(count / rows.length);
-            for (let i = 0; i < count; i++) {
-                const row = rows[Math.min(Math.floor(i / perRow2), rows.length - 1)];
-                const col = i % perRow2, wn = col / Math.max(perRow2 - 1, 1);
-                slots.push({ x: -58 + wn * 116, y: row.y, z: row.z, baseYaw: 0, zone: 'front', wallNorm: wn });
-            }
-            break;
-        }
-
-        case 'dancefloor': {
-            // ── Tanzflächen-Ring: lasers mounted on all 4 sides of the dance floor,
-            //    each aiming INWARD toward the centre of the crowd area.
-            //    The dance floor is roughly 80m wide × 40m deep, centred at (0, 0, -5).
-            // ──────────────────────────────────────────────────────────────────────────
-            const dfCX = 0, dfCZ = -5;          // dance-floor centre
-            const dfW = 80, dfD = 40;            // dance-floor width × depth
-            const dfY = [5, 9, 13];              // 3 height levels of fixture rails
-
-            // Distribute count across 4 sides proportionally to side length
-            const perimeter = 2 * (dfW + dfD);
-            const nFront = Math.round(count * dfW / perimeter);
-            const nBack  = Math.round(count * dfW / perimeter);
-            const nLeft  = Math.round(count * dfD / perimeter);
-            const nRight = count - nFront - nBack - nLeft;
-
-            const addSide = (n, side) => {
-                const perLevel = Math.ceil(n / dfY.length);
-                for (let i = 0; i < n; i++) {
-                    const yi = Math.min(Math.floor(i / perLevel), dfY.length - 1);
-                    const col = i % perLevel;
-                    const wn  = perLevel > 1 ? col / (perLevel - 1) : 0.5;
-                    let x, z, baseYaw;
-                    if (side === 'front') {
-                        // South edge – beams point north (toward stage −Z)
-                        x = dfCX - dfW / 2 + wn * dfW;
-                        z = dfCZ + dfD / 2 + 2;   // just outside front of dancefloor
-                        baseYaw = Math.PI;          // face north (-Z)
-                    } else if (side === 'back') {
-                        // North edge (behind stage) – beams point south (+Z, toward crowd)
-                        x = dfCX - dfW / 2 + wn * dfW;
-                        z = dfCZ - dfD / 2 - 2;
-                        baseYaw = 0;                // face south (+Z)
-                    } else if (side === 'left') {
-                        // West edge – beams point east (+X)
-                        x = dfCX - dfW / 2 - 2;
-                        z = dfCZ - dfD / 2 + wn * dfD;
-                        baseYaw = -Math.PI / 2;     // face right (+X)
-                    } else {
-                        // East edge – beams point west (−X)
-                        x = dfCX + dfW / 2 + 2;
-                        z = dfCZ - dfD / 2 + wn * dfD;
-                        baseYaw = Math.PI / 2;      // face left (−X)
-                    }
-                    const y = dfY[yi];
-                    slots.push({ x, y, z, baseYaw, zone: `side-${side}`, wallNorm: wn });
-                }
-            };
-            addSide(nFront, 'front');
-            addSide(nBack,  'back');
-            addSide(nLeft,  'left');
-            addSide(nRight, 'right');
-            break;
-        }
-    } // end switch
-    // Pad if formation returned fewer slots than count (shouldn't happen, but safety)
-    while (slots.length < count) slots.push({ ...slots[slots.length - 1] });
-    return slots;
-}
 
 function initLasers(count = CFG.laserCount) {
     laserObjects.forEach(l => scene.remove(l.proxy));
@@ -1668,6 +1389,7 @@ async function loadAudio(file) {
   audioBuffer = await audioCtx.decodeAudioData(ab);
   // Analyze full song offline
   songMap = await analyzeSong(audioBuffer, file.name);
+  waveformValid = false;
 }
 
 function togglePlay() {
@@ -2200,27 +1922,43 @@ function getInterpolatedValue(trackName, time) {
 }
 
 let tlSkip = 0;
+const waveformCanvas = document.createElement('canvas');
+let waveformValid = false;
+
 function updateTimeline() {
-  if (++tlSkip % 2 !== 0) return;
+  if (++tlSkip % 10 !== 0) return;
   const canvas = document.getElementById('timeline-canvas');
   const svg = document.getElementById('timeline-svg');
   if (!canvas || !songMap || !audioBuffer) return;
   const W = canvas.clientWidth;
   const H = canvas.clientHeight;
   if (W < 10) return;
-  canvas.width = W; canvas.height = H;
+
+  if (canvas.width !== W || canvas.height !== H) {
+      canvas.width = W; canvas.height = H;
+      waveformValid = false;
+  }
+
   const ctx = canvas.getContext('2d');
   const dur = audioBuffer.duration;
   const nowT = getPlaybackTime();
   ctx.clearRect(0, 0, W, H);
 
-  // Background Waveform
-  for (let px = 0; px < W; px++) {
-    const f = Math.min(Math.floor((px / W) * dur / songMap.hopSec), songMap.N - 1);
-    const en = songMap.energyMap[f];
-    ctx.fillStyle = `rgba(80,80,130,${en * 0.25})`;
-    ctx.fillRect(px, H - en * H * 0.48, 1, en * H * 0.48);
+  // Background Waveform (cached)
+  if (!waveformValid) {
+      waveformCanvas.width = W;
+      waveformCanvas.height = H;
+      const wCtx = waveformCanvas.getContext('2d');
+      wCtx.clearRect(0, 0, W, H);
+      for (let px = 0; px < W; px++) {
+        const f = Math.min(Math.floor((px / W) * dur / songMap.hopSec), songMap.N - 1);
+        const en = songMap.energyMap[f];
+        wCtx.fillStyle = `rgba(80,80,130,${en * 0.25})`;
+        wCtx.fillRect(px, H - en * H * 0.48, 1, en * H * 0.48);
+      }
+      waveformValid = true;
   }
+  ctx.drawImage(waveformCanvas, 0, 0);
 
   // Section blocks
   const activeSec = songMap.sections.find(s => s.startTime <= nowT && s.endTime > nowT);
@@ -2314,15 +2052,19 @@ function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPea
     const damp   = 0.80;
     let colorDirty = false;
 
+    // Move calculations out of loop
+    const pTimeSpeedMult = isPeakDrop ? 2.8 : 1.0;
+    const pTime = tAnim * CFG.mhSpeed * pTimeSpeedMult;
+    const sweepAmp = 1.1 + energy * 0.9 + (buildUp > 0.5 ? 0.6 : 0) + (isPeakDrop ? 1.8 : 0);
+    const tiltBase = Math.PI * 0.38;
+    const tiltAmp = 0.25 + vocals * 0.35 + drums * 0.2;
+    const tiltBuildUpMod = buildUp * 0.3 + (isPeakDrop ? 0.25 : 0);
+
     for (let i = 0; i < count; i++) {
         const mh  = movingHeadObjects[i];
         const hs  = mh.headState;
 
         // ── PAN spring (left/right sweep) ─────────────────────────────
-        const pTimeSpeedMult = isPeakDrop ? 2.8 : 1.0;
-        const pTime = tAnim * CFG.mhSpeed * pTimeSpeedMult;
-        const sweepAmp = 1.1 + energy * 0.9 + (buildUp > 0.5 ? 0.6 : 0) + (isPeakDrop ? 1.8 : 0);
-        // Stagger phase so adjacent heads don't move in lock-step
         const panStagger  = (i * 0.41 + (i % 7) * 0.27);
         const panTarget = Math.sin(pTime * 0.55 + panStagger) * Math.PI * 0.7 * sweepAmp;
         const panAcc = (panTarget - hs.pan) * spring;
@@ -2330,12 +2072,8 @@ function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPea
         hs.pan   += hs.panVel;
 
         // ── TILT spring (up/down) — positive tilt = beam aims downward ──
-        // Baseline keeps beams aimed at the stage floor (~40 % of full range)
-        const tiltBase = Math.PI * 0.38;
         const tiltOsc  = Math.cos(pTime * 0.75 + i * 0.6 + panStagger * 0.5);
-        const tiltAmp  = 0.25 + vocals * 0.35 + drums * 0.2;
-        // buildUp: beams rise (tilt decreases toward 0) for dramatic buildup effect
-        let tiltTarget = tiltBase + tiltOsc * tiltAmp - buildUp * 0.3 - (isPeakDrop ? 0.25 : 0);
+        let tiltTarget = tiltBase + tiltOsc * tiltAmp - tiltBuildUpMod;
         // Hard clamp: 0.05 rad (near-horizontal, toward audience) to 1.2 rad (steeply down)
         tiltTarget = Math.max(0.05, Math.min(1.2, tiltTarget + kick * 0.15));
 
@@ -2446,6 +2184,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
 
     // Tunnel: shared angular phase around Z, per-laser offset by wallNorm position
     const tunnelOmega = tAnim * (0.4 + energy * 0.6) * CFG.mhSpeed;
+
+    const energyChaosBase = energy > 0.80 ? (energy - 0.80) * 5.0 * (isPeakDrop ? 3.0 : 0.6) : 0;
+    const activity = isPeakDrop ? (0.4 + kick * 0.6) : kick;
 
     for (let i = 0; i < count; i++) {
         const l    = laserObjects[i];
@@ -2591,11 +2332,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             }
 
             // ── Peak-drop chaos overlay – adds controlled jitter at climax ──
-            if (energy > 0.80) {
-                const chaosStr = (energy - 0.80) * 5.0 * (isPeakDrop ? 3.0 : 0.6);
-                const activity = isPeakDrop ? (0.4 + kick * 0.6) : kick; // Continuous movement during drops!
-                localPan  += Math.sin(tAnim * 45 + i * 2.1) * 0.8 * chaosStr * activity;
-                localTilt += Math.cos(tAnim * 53 + i * 2.7) * 0.5 * chaosStr * activity;
+            if (energyChaosBase > 0) {
+                localPan  += Math.sin(tAnim * 45 + i * 2.1) * 0.8 * energyChaosBase * activity;
+                localTilt += Math.cos(tAnim * 53 + i * 2.7) * 0.5 * energyChaosBase * activity;
             }
 
             // ── Convert local pan/tilt to world Euler (YXZ order) ──────────
@@ -2979,7 +2718,7 @@ function animate() {
     }
 
     // ── Kamera-Bewegung (Camera-Shake) ────────────────────────────
-    _camShake.set(0,0,0);
+    _camShake.set(0, 0, 0);
     if (currentMode === 'live' && peakModeEnabled) {
         // Organic, mechanical rumble instead of pure random noise
         const shakeInt = (beatState.isBeat || beatState.isTransient) ? kick * (autoCamEnabled ? 1.8 : 0.6) : 0;
@@ -3068,8 +2807,8 @@ function animate() {
             targetZ += (Math.random() - 0.5) * 4.0;
         }
 
-        camera.position.lerp(_v1.set(targetX, targetY, targetZ), lerpSpeed);
-        autoCamFocus.lerp(_v2.set(lookX, lookY, lookZ), lerpSpeed * 1.5);
+        camera.position.lerp(_targetPos.set(targetX, targetY, targetZ), lerpSpeed);
+        autoCamFocus.lerp(_lookTarget.set(lookX, lookY, lookZ), lerpSpeed * 1.5);
         if (isPeakDrop) {
             autoCamFocus.x += (Math.random() - 0.5) * 3.0;
             autoCamFocus.y += (Math.random() - 0.5) * 3.0;
@@ -3244,9 +2983,7 @@ function animate() {
 
     updateTimeline();
 
-  if (typeof _camShake !== 'undefined') {
-      camera.position.add(_camShake);
-  }
+  camera.position.add(_camShake);
 
   // Render pipeline 
   if (postProcessing) {
