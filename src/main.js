@@ -225,7 +225,7 @@ try {
 }
 
 // Start with bloom composite - VHS/blur added lazily when user enables them
-if (postProcessing) postProcessing.outputNode = sceneColor.add(bloomNode);
+if (postProcessing) postProcessing.outputNode = sceneColor.add(bloomNode).toneMapping(THREE.NeutralToneMapping);
 
 // Proxy compat objects so legacy code that references filmPass.enabled etc still works
 const afterimagePass = { enabled: false };
@@ -238,7 +238,7 @@ function rebuildPostChain() {
     let chain = sceneColor.add(bloomNode);
     if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
     if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
-    postProcessing.outputNode = chain;
+    postProcessing.outputNode = chain.toneMapping(THREE.NeutralToneMapping);
     postProcessing.needsUpdate = true;
 }
 
