@@ -1,5 +1,5 @@
 // Curl Noise and Perlin Noise implementation for Pyro Worker
-function _hash(n) { return Math.sin(n) * 43758.5453123; }
+import { _hash } from "./utils/math.js";
 function _grad(ix, iy, iz, x, y, z) {
     const h = (_hash(ix + _hash(iy + _hash(iz))) * 0.5 + 0.5) % 1.0;
     const angle = h * Math.PI * 2;
@@ -37,7 +37,7 @@ function curlNoise(x, y, z, t_offset) {
 
 const systems = new Map();
 
-self.onmessage = function(e) {
+if (typeof self !== "undefined") self.onmessage = function(e) {
     const { type, id, config, data } = e.data;
 
     if (type === 'init') {
