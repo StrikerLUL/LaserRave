@@ -92,6 +92,10 @@ const dummy = new THREE.Object3D(); // Reused helper – never allocate inside l
 const _col1 = new THREE.Color();
 const _col2 = new THREE.Color();
 const _white = new THREE.Color(0xffffff);
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _camShake = new THREE.Vector3();
+const _curlTarget = { x: 0, y: 0, z: 0 };
 
 
 let currentMode = 'live'; // 'live' or 'studio'
@@ -424,7 +428,7 @@ function _perlin(x, y, z) {
                      lerp(_grad(X,Y+1,Z+1,x,y,z),_grad(X+1,Y+1,Z+1,x,y,z),fu),fv),fw);
 }
 // Curl noise: Nabla x F, gives a divergence-free vector field
-function curlNoise(x, y, z, t_offset) {
+function curlNoise(x, y, z, t_offset, target = { x: 0, y: 0, z: 0 }) {
     const eps = 0.1;
     const n = (a, b, c) => _perlin(a, b, c + t_offset);
     const dFzdx = (n(x+eps,y,z) - n(x-eps,y,z)) / (2*eps);
@@ -433,11 +437,10 @@ function curlNoise(x, y, z, t_offset) {
     const dFzdz2= (n(x,y+eps,z) - n(x,y-eps,z)) / (2*eps);
     const dFydx = (n(x+eps,y,z) - n(x-eps,y,z)) / (2*eps);
     const dFxdy = (n(x,y+eps,z) - n(x,y-eps,z)) / (2*eps);
-    return {
-        x: dFzdz2 - dFydz,
-        y: dFxdz  - dFzdx,
-        z: dFydx  - dFxdy
-    };
+    target.x = dFzdz2 - dFydz;
+    target.y = dFxdz  - dFzdx;
+    target.z = dFydx  - dFxdy;
+    return target;
 }
 
 // Generate a circular glowing texture for particles to replace the old ShaderMaterial logic
@@ -614,7 +617,7 @@ class PyroSystem {
 
             const life = 1.0 - this.age[i] / this.lifetime[i];
             const nx = this.px[i] * 0.3, ny = this.py[i] * 0.3, nz = this.pz[i] * 0.3;
-            const curl = curlNoise(nx, ny, nz, globalT * 0.5);
+            const curl = curlNoise(nx, ny, nz, globalT * 0.5, _curlTarget);
 
             // Physics integration
             this.vx[i] += curl.x * turbulenceStr * dt + windX * 0.04 * dt;
@@ -2976,7 +2979,7 @@ function animate() {
     }
 
     // ── Kamera-Bewegung (Camera-Shake) ────────────────────────────
-    let camShake = new THREE.Vector3(0,0,0);
+    _camShake.set(0,0,0);
     if (currentMode === 'live' && peakModeEnabled) {
         // Organic, mechanical rumble instead of pure random noise
         const shakeInt = (beatState.isBeat || beatState.isTransient) ? kick * (autoCamEnabled ? 1.8 : 0.6) : 0;
@@ -2984,7 +2987,7 @@ function animate() {
             const sx = (Math.sin(t * 73) * 0.5 + Math.sin(t * 31) * 0.5) * shakeInt;
             const sy = (Math.cos(t * 62) * 0.5 + Math.sin(t * 47) * 0.5) * shakeInt;
             const sz = (Math.sin(t * 88) * 0.5 + Math.cos(t * 37) * 0.5) * shakeInt;
-            camShake.set(sx, sy, sz);
+            _camShake.set(sx, sy, sz);
         }
     }
 
@@ -3065,8 +3068,8 @@ function animate() {
             targetZ += (Math.random() - 0.5) * 4.0;
         }
 
-        camera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), lerpSpeed);
-        autoCamFocus.lerp(new THREE.Vector3(lookX, lookY, lookZ), lerpSpeed * 1.5);
+        camera.position.lerp(_v1.set(targetX, targetY, targetZ), lerpSpeed);
+        autoCamFocus.lerp(_v2.set(lookX, lookY, lookZ), lerpSpeed * 1.5);
         if (isPeakDrop) {
             autoCamFocus.x += (Math.random() - 0.5) * 3.0;
             autoCamFocus.y += (Math.random() - 0.5) * 3.0;
@@ -3241,8 +3244,8 @@ function animate() {
 
     updateTimeline();
 
-  if (typeof camShake !== 'undefined') {
-      camera.position.add(camShake);
+  if (typeof _camShake !== 'undefined') {
+      camera.position.add(_camShake);
   }
 
   // Render pipeline 
