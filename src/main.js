@@ -1123,6 +1123,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
 // ── Offline band render helper ─────────────────────────────────
 async function renderBand(buf, loHz, hiHz) {
+  try {
+
   const ctx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
@@ -1141,6 +1143,11 @@ async function renderBand(buf, loHz, hiHz) {
   }
   src.start();
   return (await ctx.startRendering()).getChannelData(0);
+
+  } catch (error) {
+    console.error("Error in renderBand:", error);
+    return new Float32Array(buf.length);
+  }
 }
 
 // ── Per-frame RMS ──────────────────────────────────────────────
@@ -1375,6 +1382,8 @@ let mediaStreamDest = null;
 
 // ── Revised loadAudio ─────────────────────────────────────────
 async function loadAudio(file) {
+  try {
+
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioCtx.createAnalyser();
@@ -1389,9 +1398,16 @@ async function loadAudio(file) {
   // Analyze full song offline
   songMap = await analyzeSong(audioBuffer, file.name);
   waveformValid = false;
+
+  } catch (error) {
+    console.error("Error loading audio:", error);
+    alert("Audio konnte nicht geladen werden. Bitte prüfen Sie das Dateiformat.");
+  }
 }
 
 function togglePlay() {
+  try {
+
   if (!audioBuffer) return;
   if (audioCtx.state === 'suspended') audioCtx.resume();
   if (playing) {
@@ -1418,6 +1434,10 @@ function togglePlay() {
       videoObj.currentTime = playbackStartOffset % dur;
       videoObj.play().catch(console.error);
     }
+  }
+
+  } catch (error) {
+    console.error("Error toggling play:", error);
   }
 }
 
@@ -2990,10 +3010,23 @@ function animate() {
 
 try {
     await renderer.init();
+    renderer.setAnimationLoop(animate);
 } catch (e) {
     console.error("WebGPU init failed", e);
+    const fallbackDiv = document.createElement('div');
+    fallbackDiv.style.position = 'absolute';
+    fallbackDiv.style.top = '50%';
+    fallbackDiv.style.left = '50%';
+    fallbackDiv.style.transform = 'translate(-50%, -50%)';
+    fallbackDiv.style.color = 'white';
+    fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+    fallbackDiv.style.padding = '20px';
+    fallbackDiv.style.borderRadius = '10px';
+    fallbackDiv.style.fontFamily = 'sans-serif';
+    fallbackDiv.style.zIndex = '9999';
+    fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
+    document.body.appendChild(fallbackDiv);
 }
-renderer.setAnimationLoop(animate);
 
 // ─────────────────────────────────────────────
 //  PYRO UI LISTENERS
