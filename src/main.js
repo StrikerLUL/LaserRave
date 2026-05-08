@@ -1,3 +1,4 @@
+import { computeFormation } from './utils/computeFormation.js';
 import * as THREE from 'three';
 import { pass, uniform } from 'three/tsl';
 import { WebGPURenderer, RenderPipeline } from 'three/webgpu';
@@ -596,18 +597,7 @@ let upLightsEnabled = false;
 let hazeSystem   = null;
 let hazeMaterial = null;
 
-/** Returns [{x,y,z,ry}] position for each projector based on formation */
-function computeFormation(count, formation) {
-  const pos = [];
-  switch (formation) {
-    case 'line': {
-      const sp = 44 / Math.max(count - 1, 1);
-      for (let i = 0; i < count; i++) pos.push({ x: -22 + i * sp, y: 11.85, z: -15, ry: 0 });
-      break;
-    }
-  }
-  return pos;
-}
+
 
 const sharedGeos = new Map();
 const sharedMats = new Map();
@@ -1891,8 +1881,6 @@ function detectTransient(high) {
   return high > Math.max(avg * 1.7, 0.18);
 }
 
-const PATTERNS = ['fan', 'xcross', 'scatter', 'wave', 'strobe', 'sidesweep', 'salvo', 'tunnel', 'sine', 'chase', 'chase-fast', 'sparkle', 'pulse', 'zigzag'];
-
 // ─────────────────────────────────────────────
 //  SONG TIMELINE RENDERER
 // ─────────────────────────────────────────────
@@ -2039,10 +2027,6 @@ function updateTimeline() {
 let t = 0;
 let dynamicBeatPhase = 0;
 let lastRawBeatPhase = 0;
-
-let _wQuat = null;
-let _wPos = null;
-let _wDir = null;
 
 function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPeakDrop, isSilent, buildUp) {
     if (!mhBaseIM) return;

@@ -77,7 +77,7 @@ export function getRMS(array, hopSize) {
     return out;
 }
 
-function normalize(arr) {
+export function normalize(arr) {
     let max = 0;
     for (let i = 0; i < arr.length; i++) if (arr[i] > max) max = arr[i];
     if (max > 1e-9) for (let i = 0; i < arr.length; i++) arr[i] /= max;
@@ -125,8 +125,7 @@ function createHeuristicStems(audioData, sampleRate, hopSec) {
     return { bass, drums, vocals, melody };
 }
 
-if (typeof self !== 'undefined') {
-self.onmessage = async (e) => {
+if (typeof self !== 'undefined') self.onmessage = async (e) => {
     const { type, audioData, sampleRate } = e.data;
 
     if (type === 'init') {
