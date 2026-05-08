@@ -62,7 +62,7 @@ class BiquadFilter {
     }
 }
 
-function getRMS(array, hopSize) {
+export function getRMS(array, hopSize) {
     const numFrames = Math.floor(array.length / hopSize);
     const out = new Float32Array(numFrames);
     for (let f = 0; f < numFrames; f++) {
@@ -145,3 +145,4 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
         }, 50); // Kleiner Timeout um UI Update durchzulassen
     }
 };
+}
