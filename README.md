@@ -98,6 +98,12 @@ npm run dev
    - **FX** — toggle Bloom trail, VHS/Film grain, Lens flares
 7. Use **Auto-Cam** or **TV Mode** for automated cinematic camera movement.
 8. Click **🔴 Record Video** to capture a WebM export.
+9. **Keyboard Shortcuts:**
+   - `Space`: Toggle Play/Pause
+   - `F`: Toggle Fullscreen (or double-click the 3D view)
+   - `C`: Toggle Auto-Cam
+   - `T`: Toggle TV Mode
+   - `H`: Toggle UI Panel Visibility
 
 ---
 

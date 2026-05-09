@@ -145,4 +145,3 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
         }, 50); // Kleiner Timeout um UI Update durchzulassen
     }
 };
-}
