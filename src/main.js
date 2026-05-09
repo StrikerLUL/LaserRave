@@ -1395,6 +1395,18 @@ async function loadAudio(file) {
   }
 }
 
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(err => {
+      console.warn(`Error attempting to enable fullscreen: ${err.message}`);
+    });
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  }
+}
+
 function togglePlay() {
   try {
 
@@ -1686,6 +1698,41 @@ document.addEventListener('keydown', (e) => {
 
 document.getElementById('btn-play-pause').addEventListener('click', togglePlay);
 document.getElementById('btn-record').addEventListener('click', toggleRecording);
+const btnFullscreen = document.getElementById('btn-fullscreen');
+if (btnFullscreen) btnFullscreen.addEventListener('click', toggleFullscreen);
+
+document.getElementById('canvas-container').addEventListener('dblclick', toggleFullscreen);
+
+window.addEventListener('keydown', (e) => {
+  // Ignore if user is typing in an input
+  if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+  switch(e.key.toLowerCase()) {
+    case ' ':
+      e.preventDefault(); // Prevent scrolling
+      togglePlay();
+      break;
+    case 'f':
+      toggleFullscreen();
+      break;
+    case 'c':
+      if (document.getElementById('param-autocam')) {
+        document.getElementById('param-autocam').click();
+      }
+      break;
+    case 't':
+      if (document.getElementById('param-tvmode')) {
+        document.getElementById('param-tvmode').click();
+      }
+      break;
+    case 'h':
+      const ui = document.getElementById('ui-container');
+      if (ui) {
+        ui.style.display = ui.style.display === 'none' ? 'flex' : 'none';
+      }
+      break;
+  }
+});
 document.getElementById('param-intensity').addEventListener('input', e => { CFG.intensity = +e.target.value; });
 document.getElementById('param-speed').addEventListener('input', e => { CFG.speed = +e.target.value; });
 document.getElementById('param-mh-intensity').addEventListener('input', e => { CFG.mhIntensity = +e.target.value; });
