@@ -1662,6 +1662,28 @@ if (paramTiktok) {
     window.dispatchEvent(new Event('resize')); 
   });
 }
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(err => {
+      console.warn(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'f' || e.key === 'F') {
+    // Prevent triggering if user is typing in an input field
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+      return;
+    }
+    toggleFullscreen();
+  }
+});
+
 document.getElementById('btn-play-pause').addEventListener('click', togglePlay);
 document.getElementById('btn-record').addEventListener('click', toggleRecording);
 document.getElementById('param-intensity').addEventListener('input', e => { CFG.intensity = +e.target.value; });
