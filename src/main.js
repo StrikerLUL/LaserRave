@@ -137,11 +137,20 @@ let variationPhase    = 0;  // micro-variation index (0–3), changes every 16 b
 
 const W = window.innerWidth, H = window.innerHeight;
 
-const renderer = new WebGPURenderer({ 
-  antialias: true, 
-  powerPreference: "high-performance",
-  forceWebGL: false
-});
+let renderer;
+try {
+  renderer = new WebGPURenderer({
+    antialias: true,
+    powerPreference: "high-performance",
+    forceWebGL: false
+  });
+} catch (e) {
+  console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    powerPreference: "high-performance"
+  });
+}
 renderer.setSize(W, H);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 // Fix: Disable built-in tone mapping to allow TSL post-processing to handle colors organically without crushing HDR data before bloom.
@@ -1408,10 +1417,19 @@ function toggleFullscreen() {
   }
 }
 
-function togglePlay() {
+async function togglePlay() {
   try {
 
-  if (!audioBuffer) return;
+  if (!audioBuffer) {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    }
+    audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+    songMap = await analyzeSong(audioBuffer, "Fallback");
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   if (playing) {
     playbackStartOffset = getPlaybackTime(); // save position
@@ -1675,16 +1693,6 @@ if (paramTiktok) {
     window.dispatchEvent(new Event('resize')); 
   });
 }
-function toggleFullscreen() {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen().catch(err => {
-      console.warn(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-    });
-  } else {
-    document.exitFullscreen();
-  }
-}
-
 document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
 
 document.addEventListener('keydown', (e) => {
@@ -3068,10 +3076,12 @@ function animate() {
 }
 
 try {
-    await renderer.init();
+    if (renderer.init) {
+        await renderer.init();
+    }
     renderer.setAnimationLoop(animate);
 } catch (e) {
-    console.error("WebGPU init failed", e);
+    console.error("Renderer init failed", e);
     const fallbackDiv = document.createElement('div');
     fallbackDiv.style.position = 'absolute';
     fallbackDiv.style.top = '50%';
