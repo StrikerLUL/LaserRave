@@ -139,23 +139,49 @@ const W = window.innerWidth, H = window.innerHeight;
 
 let renderer;
 try {
-  renderer = new WebGPURenderer({
-    antialias: true,
-    powerPreference: "high-performance",
-    forceWebGL: false
-  });
+  try {
+    renderer = new WebGPURenderer({
+      antialias: true,
+      powerPreference: "high-performance",
+      forceWebGL: false
+    });
+  } catch (e) {
+    console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+  }
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // Fix: Disable built-in tone mapping to allow TSL post-processing to handle colors organically without crushing HDR data before bloom.
+  renderer.toneMapping = THREE.NoToneMapping;
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
 } catch (e) {
-  console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance"
-  });
+  console.error("Critical renderer initialization error:", e);
+  const fallbackDiv = document.createElement('div');
+  fallbackDiv.style.position = 'absolute';
+  fallbackDiv.style.top = '50%';
+  fallbackDiv.style.left = '50%';
+  fallbackDiv.style.transform = 'translate(-50%, -50%)';
+  fallbackDiv.style.color = 'white';
+  fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+  fallbackDiv.style.padding = '20px';
+  fallbackDiv.style.borderRadius = '10px';
+  fallbackDiv.style.fontFamily = 'sans-serif';
+  fallbackDiv.style.zIndex = '9999';
+  fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
+  document.body.appendChild(fallbackDiv);
+
+  // Mock renderer to prevent immediate downstream TypeError crashes
+  renderer = {
+    render: () => {},
+    setAnimationLoop: () => {},
+    setSize: () => {},
+    init: async () => {},
+    domElement: document.createElement('canvas')
+  };
 }
-renderer.setSize(W, H);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-// Fix: Disable built-in tone mapping to allow TSL post-processing to handle colors organically without crushing HDR data before bloom.
-renderer.toneMapping = THREE.NoToneMapping;
-document.getElementById('canvas-container').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
@@ -930,9 +956,26 @@ let playbackStartCtxTime = 0; // audioCtx.currentTime when play started
 let playbackStartOffset  = 0; // offset in song (seconds) when play started
 let songMap = null;           // pre-analyzed song data
 
+function initAudioContext() {
+  if (audioCtx) return true;
+  try {
+    const AudioCtxConstructor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtxConstructor) throw new Error("AudioContext not supported");
+    audioCtx = new AudioCtxConstructor();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    return true;
+  } catch (e) {
+    console.warn("Failed to initialize AudioContext:", e);
+    return false;
+  }
+}
+
 function getPlaybackTime() {
-  if (!playing || !audioCtx || !audioBuffer) return 0;
-  const elapsed = (audioCtx.currentTime - playbackStartCtxTime) + playbackStartOffset;
+  if (!playing || !audioBuffer) return 0;
+  const now = audioCtx ? audioCtx.currentTime : (performance.now() / 1000);
+  const elapsed = (now - playbackStartCtxTime) + playbackStartOffset;
   return elapsed % audioBuffer.duration; // handle loop
 }
 
@@ -1383,16 +1426,12 @@ let mediaStreamDest = null;
 async function loadAudio(file) {
   try {
 
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-  }
+  initAudioContext();
   if (playing && source) { source.stop(); playing = false; }
   playbackStartOffset = 0;
   songMap = null;
   const ab = await file.arrayBuffer();
+  if (!audioCtx) throw new Error("AudioContext not initialized");
   audioBuffer = await audioCtx.decodeAudioData(ab);
   // Analyze full song offline
   songMap = await analyzeSong(audioBuffer, file.name);
@@ -1400,7 +1439,19 @@ async function loadAudio(file) {
 
   } catch (error) {
     console.error("Error loading audio:", error);
-    alert("Audio konnte nicht geladen werden. Bitte prüfen Sie das Dateiformat.");
+    alert("Audio konnte nicht geladen werden. Ein Fallback wird verwendet.");
+
+    // Graceful fallback for audio buffer
+    try {
+        initAudioContext();
+        if (audioCtx) {
+            audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+            songMap = await analyzeSong(audioBuffer, "Fallback");
+            waveformValid = false;
+        }
+    } catch (fallbackError) {
+        console.error("Fallback audio generation failed:", fallbackError);
+    }
   }
 }
 
@@ -1421,33 +1472,39 @@ async function togglePlay() {
   try {
 
   if (!audioBuffer) {
-    if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 512;
-      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    initAudioContext();
+    if (audioCtx) {
+      audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+      songMap = await analyzeSong(audioBuffer, "Fallback");
+    } else {
+      // Mock minimum buffer data so the application doesn't crash on timeline math
+      audioBuffer = { duration: 10 };
+      songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
     }
-    audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
-    songMap = await analyzeSong(audioBuffer, "Fallback");
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   if (playing) {
     playbackStartOffset = getPlaybackTime(); // save position
-    source.stop(); playing = false;
+    if (source) source.stop();
+    playing = false;
     document.getElementById('btn-play-pause').textContent = 'Play';
     if (videoObj) videoObj.pause();
   } else {
-    source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(analyser);
-    
-    try { analyser.disconnect(); } catch(e){}
-    if (mediaStreamDest) analyser.connect(mediaStreamDest);
-    if (!isRecording) analyser.connect(audioCtx.destination);
-    
-    source.loop = true;
-    source.start(0, playbackStartOffset % audioBuffer.duration);
-    playbackStartCtxTime = audioCtx.currentTime;
+    if (audioCtx) {
+      source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(analyser);
+
+      try { analyser.disconnect(); } catch(e){}
+      if (mediaStreamDest) analyser.connect(mediaStreamDest);
+      if (!isRecording) analyser.connect(audioCtx.destination);
+
+      source.loop = true;
+      source.start(0, playbackStartOffset % audioBuffer.duration);
+      playbackStartCtxTime = audioCtx.currentTime;
+    } else {
+      playbackStartCtxTime = performance.now() / 1000;
+    }
     playing = true;
     document.getElementById('btn-play-pause').textContent = 'Pause';
     if (videoObj) {
