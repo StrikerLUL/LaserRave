@@ -1395,6 +1395,7 @@ async function loadAudio(file) {
   }
 }
 
+
 function toggleFullscreen() {
   if (!document.fullscreenElement) {
     document.documentElement.requestFullscreen().catch(err => {
@@ -3059,6 +3060,11 @@ function animate() {
   } else {
       renderer.render(scene, camera);
   }
+
+  if (needsScreenshot) {
+      needsScreenshot = false;
+      saveScreenshot();
+  }
 }
 
 try {
@@ -3255,6 +3261,28 @@ document.getElementById('svg-upload').addEventListener('change', async (e) => {
 // ─────────────────────────────────────────────
 //  4K OFFLINE RENDER (WebCodecs)
 // ─────────────────────────────────────────────
+let needsScreenshot = false;
+document.getElementById('btn-screenshot').addEventListener('click', () => {
+  needsScreenshot = true;
+});
+
+function saveScreenshot() {
+  renderer.domElement.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `lasershow_screenshot_${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  }, 'image/png');
+}
+
 document.getElementById('btn-render').addEventListener('click', async () => {
     if (!audioBuffer) return;
     
