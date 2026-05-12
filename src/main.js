@@ -178,7 +178,9 @@ try {
     render: () => {},
     setAnimationLoop: () => {},
     setSize: () => {},
+    setPixelRatio: () => {},
     init: async () => {},
+    toneMapping: THREE.NoToneMapping,
     domElement: document.createElement('canvas')
   };
 }
@@ -1166,8 +1168,13 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 // ── Offline band render helper ─────────────────────────────────
 async function renderBand(buf, loHz, hiHz) {
   try {
+  const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OfflineCtxConstructor) {
+    console.warn("OfflineAudioContext not supported, using fallback band array.");
+    return new Float32Array(buf.length);
+  }
 
-  const ctx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
+  const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   let last = src;
@@ -1228,25 +1235,26 @@ function makeLissajous(seed) {
 
 // ── Full song analysis ────────────────────────────────────────
 async function analyzeSong(audioBuf, fileName) {
-  const sr = audioBuf.sampleRate;
-  const len = audioBuf.length;
-  const hopSec = 0.023;
-  const hop = Math.round(sr * hopSec);
-  const N = Math.floor(len / hop);
+  try {
+    const sr = audioBuf.sampleRate;
+    const len = audioBuf.length;
+    const hopSec = 0.023;
+    const hop = Math.round(sr * hopSec);
+    const N = Math.floor(len / hop);
 
-  setProgress(5, '⏳ Rendering audio bands…  5%');
-  document.getElementById('btn-play-pause').disabled = true;
-  await new Promise(r => setTimeout(r, 0));
+    setProgress(5, '⏳ Rendering audio bands…  5%');
+    document.getElementById('btn-play-pause').disabled = true;
+    await new Promise(r => setTimeout(r, 0));
 
-  // Stage 1 – offline rendering (heaviest)
-  const [bd, md, hd, fd] = await Promise.all([
-    renderBand(audioBuf,    0,  250),
-    renderBand(audioBuf,  250, 3500),
-    renderBand(audioBuf, 3500,    0),
-    renderBand(audioBuf,    0,    0),
-  ]);
+    // Stage 1 – offline rendering (heaviest)
+    const [bd, md, hd, fd] = await Promise.all([
+      renderBand(audioBuf,    0,  250),
+      renderBand(audioBuf,  250, 3500),
+      renderBand(audioBuf, 3500,    0),
+      renderBand(audioBuf,    0,    0),
+    ]);
 
-  setProgress(32, '⏳ Loading AI Stem Separator…');
+    setProgress(32, '⏳ Loading AI Stem Separator…');
   
   const worker = new Worker(new URL('./ai-worker.js', import.meta.url), { type: 'module' });
   let aiStems = null;
@@ -1382,6 +1390,30 @@ async function analyzeSong(audioBuf, fileName) {
   
   console.log(`Song analyzed: ${beats.length} beats @ ${estimatedBPM} BPM, ${sections.length} sections`);
   return { bassMap, midMap, highMap, melodyMap, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
+  } catch (err) {
+    console.error("Analysis failed, returning fallback map:", err);
+    document.getElementById('btn-play-pause').disabled = false;
+    document.getElementById('btn-render').disabled = false;
+    return {
+      bassMap: new Float32Array(100),
+      midMap: new Float32Array(100),
+      highMap: new Float32Array(100),
+      melodyMap: new Float32Array(100),
+      energyMap: new Float32Array(100),
+      buildUpMap: new Float32Array(100),
+      beats: [{ time: 0, str: 1 }],
+      sections: [{
+        startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+        avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+        bassW: 0.33, midW: 0.33, trebleW: 0.33,
+        seed: 0, id: 0,
+        baseHue: 0, pattern: 'sidesweep',
+        liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+        speedScale: 1, spreadMod: 1
+      }],
+      hopSec: 0.1, hop: 4410, N: 100, bpm: 120
+    };
+  }
 }
 
 // ── Live lookup helpers ───────────────────────────────────────
@@ -1448,9 +1480,14 @@ async function loadAudio(file) {
             audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
             songMap = await analyzeSong(audioBuffer, "Fallback");
             waveformValid = false;
+        } else {
+            throw new Error("No audioCtx available for fallback");
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
+        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
+        waveformValid = false;
     }
   }
 }
@@ -1478,8 +1515,14 @@ async function togglePlay() {
       songMap = await analyzeSong(audioBuffer, "Fallback");
     } else {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10 };
-      songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+      songMap = {
+        bpm: 120,
+        beats: [{ time: 0, str: 1 }],
+        sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
+        bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
+        hopSec: 0.1, N: 100
+      };
     }
   }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
