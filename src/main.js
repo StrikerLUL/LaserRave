@@ -84,6 +84,7 @@ const CFG = {
     cyberpunk:[0xff00ff, 0x00ffff, 0xaa00ff, 0xff0088, 0x00ffaa, 0xffaa00],
     warm:     [0xff2200, 0xff6600, 0xffaa00, 0xff0000, 0xff3300, 0xffcc00],
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
+    vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
   }
 };
 
@@ -1037,10 +1038,10 @@ function hueToHex(hue, sat = 1.0, lit = 0.58) {
 // The real-time override is handled by livePatternDecider() in the animation loop.
 function pickPattern(bass, mid, high, energy, idx) {
   if (energy < 0.15) return ['sidesweep', 'pulse', 'sine'][idx % 3];
-  if (energy > 0.80) return ['scatter', 'strobe', 'sparkle', 'chase-fast'][idx % 4];
+  if (energy > 0.80) return ['scatter', 'strobe', 'sparkle', 'chase-fast', 'vortex'][idx % 5];
   if (bass > mid && bass > high)  return ['fan', 'salvo', 'zigzag', 'wave'][idx % 4];
   if (high > bass && high > mid)  return ['chase-fast', 'sparkle', 'zigzag', 'scatter'][idx % 4];
-  return ['wave', 'tunnel', 'chase', 'sine'][idx % 4]; // mid-dominant
+  return ['wave', 'tunnel', 'chase', 'sine', 'vortex'][idx % 5]; // mid-dominant
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1120,8 +1121,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
       wanted = 'sparkle';
 
     } else if (midDom && melHigh) {
-      // Melody lead → wave (smooth travelling ripple follows melodic arc)
-      wanted = 'wave';
+      // Melody lead → wave (smooth travelling ripple follows melodic arc) or vortex
+      wanted = energy > 0.65 ? 'vortex' : 'wave';
 
     } else if (midDom) {
       // Mid-dominant without clear melody → tunnel (hypnotic, mid-range)
@@ -2416,6 +2417,19 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * lzf * 0.5 + lzp + wn * 0.8) * 0.85 * sp;
                     localPan  = sweep + bass * iPhase * 0.35;
                     localTilt = tiltRad + Math.sin(tAnim * lyf * 0.25 + lyp) * 0.15 * sp;
+                    break;
+                }
+                case 'vortex': {
+                    // Spiraling movement
+                    const radius = 0.5 + Math.sin(tAnim * 0.5) * 0.5; // Expanding and contracting radius
+                    const angle = tAnim * 2.0 + (i / CFG.laserCount) * Math.PI * 4; // Spiral offset per laser
+                    localPan = Math.cos(angle) * radius * sp;
+                    localTilt = tiltRad + Math.sin(angle) * radius * 0.5 * sp;
+                    // Add subtle energy-reactive shake
+                    if (energy > 0.6) {
+                        localPan += (Math.random() - 0.5) * energy * 0.1;
+                        localTilt += (Math.random() - 0.5) * energy * 0.1;
+                    }
                     break;
                 }
                 // ─── STROBE: static positions with hard flicker ──────────────
