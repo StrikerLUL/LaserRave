@@ -177,8 +177,13 @@ try {
   // Mock renderer to prevent immediate downstream TypeError crashes
   renderer = {
     render: () => {},
-    setAnimationLoop: () => {},
+    setAnimationLoop: (cb) => {
+        function loop() { cb(); requestAnimationFrame(loop); }
+        requestAnimationFrame(loop);
+    },
     setSize: () => {},
+    setPixelRatio: () => {},
+    toneMapping: THREE.NoToneMapping,
     init: async () => {},
     domElement: document.createElement('canvas')
   };
@@ -1168,7 +1173,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 async function renderBand(buf, loHz, hiHz) {
   try {
 
-  const ctx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
+  const OfflineAudioCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const ctx = new OfflineAudioCtx(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   let last = src;
@@ -1449,9 +1455,16 @@ async function loadAudio(file) {
             audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
             songMap = await analyzeSong(audioBuffer, "Fallback");
             waveformValid = false;
+        } else {
+            audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
+            songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+            waveformValid = false;
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
+        audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+        waveformValid = false;
     }
   }
 }
@@ -1479,7 +1492,7 @@ async function togglePlay() {
       songMap = await analyzeSong(audioBuffer, "Fallback");
     } else {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10 };
+      audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
       songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
     }
   }
@@ -3161,6 +3174,8 @@ try {
     fallbackDiv.style.zIndex = '9999';
     fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
     document.body.appendChild(fallbackDiv);
+
+    if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
 }
 
 // ─────────────────────────────────────────────
