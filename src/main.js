@@ -84,6 +84,7 @@ const CFG = {
     cyberpunk:[0xff00ff, 0x00ffff, 0xaa00ff, 0xff0088, 0x00ffaa, 0xffaa00],
     warm:     [0xff2200, 0xff6600, 0xffaa00, 0xff0000, 0xff3300, 0xffcc00],
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
+    synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
   }
 };
 
@@ -1039,7 +1040,7 @@ function pickPattern(bass, mid, high, energy, idx) {
   if (energy < 0.15) return ['sidesweep', 'pulse', 'sine'][idx % 3];
   if (energy > 0.80) return ['scatter', 'strobe', 'sparkle', 'chase-fast'][idx % 4];
   if (bass > mid && bass > high)  return ['fan', 'salvo', 'zigzag', 'wave'][idx % 4];
-  if (high > bass && high > mid)  return ['chase-fast', 'sparkle', 'zigzag', 'scatter'][idx % 4];
+  if (high > bass && high > mid)  return ['chase-fast', 'starburst', 'zigzag', 'scatter'][idx % 4];
   return ['wave', 'tunnel', 'chase', 'sine'][idx % 4]; // mid-dominant
 }
 
@@ -1116,8 +1117,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
       wanted = energy > 0.68 ? 'chase-fast' : 'chase';
 
     } else if (trebleDom && energy < 0.50) {
-      // Quiet treble → sparkle (random twinkling fits hi-hats)
-      wanted = 'sparkle';
+      // Quiet treble → starburst (random twinkling fits hi-hats)
+      wanted = 'starburst';
 
     } else if (midDom && melHigh) {
       // Melody lead → wave (smooth travelling ripple follows melodic arc)
@@ -2463,6 +2464,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(lzp + wn * Math.PI) * 0.3 * sp;
                     break;
                 }
+                // ─── STARBURST ───────────────────────────────────────────
+                case 'starburst': {
+                    localPan = Math.sin(tAnim * lxf * 3.0 + lxp) * 1.5 * sp * (isPeakDrop ? 2.0 : 1.0);
+                    localTilt = tiltRad + Math.cos(tAnim * lyf * 3.0 + lyp) * 0.8 * sp;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -2510,6 +2517,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'pulse') {
                 // Alternate breathing
                 patternOpMod = 0.5 + Math.sin(tAnim * 2.0 + iPhase * Math.PI) * 0.5;
+            } else if (pat === 'starburst') {
+                patternOpMod = (Math.sin(tAnim * 12.0 + i * 5.0) > 0.5) ? 1.0 : 0.2;
             } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
                 patternOpMod = 0.0;
             }
