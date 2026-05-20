@@ -1606,51 +1606,63 @@ function toggleRecording() {
     btn.textContent = '⏹️ Stop Recording (Recording...)';
     btn.style.backgroundColor = '#666666';
     
-    if (!mediaStreamDest) mediaStreamDest = audioCtx.createMediaStreamDestination();
-    
-    try { analyser.disconnect(); } catch(e){}
-    analyser.connect(mediaStreamDest);
-    
-    const canvasStream = renderer.domElement.captureStream(60);
-    const combinedStream = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...mediaStreamDest.stream.getAudioTracks()
-    ]);
-    
-    let options = { videoBitsPerSecond: 35000000 }; // 35 Mbps for high quality motion
-    const mimeTypes = [
-        'video/x-matroska;codecs=avc1', // Hardware accelerated H264
-        'video/webm;codecs=h264',
-        'video/webm;codecs=vp9',
-        'video/webm;codecs=vp8',
-        'video/webm'
-    ];
-    
-    for (const mime of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mime)) {
-            options.mimeType = mime;
-            break;
-        }
+    try {
+      if (!mediaStreamDest) mediaStreamDest = audioCtx.createMediaStreamDestination();
+
+      try { analyser.disconnect(); } catch(e){}
+      analyser.connect(mediaStreamDest);
+
+      const canvasStream = renderer.domElement.captureStream(60);
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...mediaStreamDest.stream.getAudioTracks()
+      ]);
+
+      let options = { videoBitsPerSecond: 35000000 }; // 35 Mbps for high quality motion
+      const mimeTypes = [
+          'video/x-matroska;codecs=avc1', // Hardware accelerated H264
+          'video/webm;codecs=h264',
+          'video/webm;codecs=vp9',
+          'video/webm;codecs=vp8',
+          'video/webm'
+      ];
+
+      for (const mime of mimeTypes) {
+          if (MediaRecorder.isTypeSupported(mime)) {
+              options.mimeType = mime;
+              break;
+          }
+      }
+
+      const isMkv = options.mimeType && options.mimeType.includes('matroska');
+      const ext = isMkv ? 'mkv' : 'webm';
+
+      mediaRecorder = new MediaRecorder(combinedStream, options);
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: options.mimeType || 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `lasershow_export.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      };
+
+      mediaRecorder.start();
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      alert("Recording could not be started. A fallback or unsupported browser might be in use.");
+      isRecording = false;
+      btn.textContent = '🔴 Record Video';
+      btn.style.backgroundColor = '#aa2222';
+      if (playing) {
+         try { analyser.disconnect(); } catch(e){}
+         analyser.connect(audioCtx.destination);
+      }
     }
-    
-    const isMkv = options.mimeType && options.mimeType.includes('matroska');
-    const ext = isMkv ? 'mkv' : 'webm';
-    
-    mediaRecorder = new MediaRecorder(combinedStream, options);
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(recordedChunks, { type: options.mimeType || 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `lasershow_export.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-    };
-    
-    mediaRecorder.start();
     
     if (tiktokModeEnabled && songMap && songMap.sections.length > 0) {
       // Welcher Startmodus ist gewählt?
@@ -3249,6 +3261,21 @@ try {
     fallbackDiv.style.zIndex = '9999';
     fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
     document.body.appendChild(fallbackDiv);
+
+    // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
+    renderer = {
+        render: () => {},
+        setAnimationLoop: (cb) => {
+            function loop() { cb(); requestAnimationFrame(loop); }
+            requestAnimationFrame(loop);
+        },
+        setSize: () => {},
+        setPixelRatio: () => {},
+        toneMapping: THREE.NoToneMapping,
+        init: async () => {},
+        domElement: document.createElement('canvas')
+    };
+    postProcessing = null;
 
     if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
 }
