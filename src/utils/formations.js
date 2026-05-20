@@ -109,6 +109,24 @@ export function computeFormationPositions(count, formation) {
             break;
         }
 
+        case 'vshape': {
+            // V-Shape: Center is farther back or forward, expanding outward
+            const rows = [{ y: 18 }, { y: 14 }, { y: 10 }];
+            const perRow = Math.ceil(count / rows.length);
+            for (let i = 0; i < count; i++) {
+                const rowIdx = Math.min(Math.floor(i / perRow), rows.length - 1);
+                const row = rows[rowIdx];
+                const col = i % perRow;
+                const wn = perRow > 1 ? col / (perRow - 1) : 0.5;
+                // X goes from -58 to 58
+                const x = -58 + wn * 116;
+                // Z forms a V-shape: center is closer (z = -20), edges are further back (z = -35)
+                const z = -20 - Math.abs(wn - 0.5) * 30 + rowIdx * 4;
+                slots.push({ x, y: row.y, z, baseYaw: 0, zone: 'front', wallNorm: wn });
+            }
+            break;
+        }
+
         case 'front': default: {
             // 4 front trusses spanning full stage width
             const rows = [{ y: 18, z: -28 }, { y: 14, z: -24 }, { y: 11, z: -20 }, { y: 7.5, z: -16 }];

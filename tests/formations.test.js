@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { test, describe } from 'node:test';
 
 describe('computeFormationPositions', () => {
-    const formations = ['front', 'twin', 'sides', 'surround', 'corners', 'aerial', 'dancefloor'];
+    const formations = ['front', 'twin', 'sides', 'surround', 'corners', 'aerial', 'dancefloor', 'vshape'];
     const counts = [1, 4, 10, 20];
 
     formations.forEach(formation => {

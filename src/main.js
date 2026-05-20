@@ -85,6 +85,7 @@ const CFG = {
     warm:     [0xff2200, 0xff6600, 0xffaa00, 0xff0000, 0xff3300, 0xffcc00],
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
+    synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
   }
 };
 
@@ -177,9 +178,15 @@ try {
   // Mock renderer to prevent immediate downstream TypeError crashes
   renderer = {
     render: () => {},
-    setAnimationLoop: () => {},
+    setAnimationLoop: (cb) => {
+        function loop() { cb(); requestAnimationFrame(loop); }
+        requestAnimationFrame(loop);
+    },
     setSize: () => {},
+    setPixelRatio: () => {},
+    toneMapping: THREE.NoToneMapping,
     init: async () => {},
+    toneMapping: THREE.NoToneMapping,
     domElement: document.createElement('canvas')
   };
 }
@@ -1042,6 +1049,8 @@ function pickPattern(bass, mid, high, energy, idx) {
   if (bass > mid && bass > high)  return ['fan', 'salvo', 'zigzag', 'wave'][idx % 4];
   if (high > bass && high > mid)  return ['chase-fast', 'sparkle', 'zigzag', 'scatter'][idx % 4];
   return ['wave', 'tunnel', 'chase', 'sine', 'vortex'][idx % 5]; // mid-dominant
+  if (high > bass && high > mid)  return ['chase-fast', 'starburst', 'zigzag', 'scatter'][idx % 4];
+  return ['wave', 'tunnel', 'chase', 'sine'][idx % 4]; // mid-dominant
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1070,7 +1079,11 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (!playing || isSilent) {
+  if (CFG.theme === 'synthwave' && playing && !isSilent) {
+    // Force the vortex pattern when the synthwave theme is active and music is playing
+    wanted = 'vortex';
+
+  } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
     wanted = 'sidesweep';
 
@@ -1117,8 +1130,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
       wanted = energy > 0.68 ? 'chase-fast' : 'chase';
 
     } else if (trebleDom && energy < 0.50) {
-      // Quiet treble → sparkle (random twinkling fits hi-hats)
-      wanted = 'sparkle';
+      // Quiet treble → starburst (random twinkling fits hi-hats)
+      wanted = 'starburst';
 
     } else if (midDom && melHigh) {
       // Melody lead → wave (smooth travelling ripple follows melodic arc) or vortex
@@ -1167,8 +1180,15 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 // ── Offline band render helper ─────────────────────────────────
 async function renderBand(buf, loHz, hiHz) {
   try {
+  const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OfflineCtxConstructor) {
+    console.warn("OfflineAudioContext not supported, using fallback band array.");
+    return new Float32Array(buf.length);
+  }
 
-  const ctx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
+  const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
+  const OfflineAudioCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const ctx = new OfflineAudioCtx(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   let last = src;
@@ -1229,25 +1249,26 @@ function makeLissajous(seed) {
 
 // ── Full song analysis ────────────────────────────────────────
 async function analyzeSong(audioBuf, fileName) {
-  const sr = audioBuf.sampleRate;
-  const len = audioBuf.length;
-  const hopSec = 0.023;
-  const hop = Math.round(sr * hopSec);
-  const N = Math.floor(len / hop);
+  try {
+    const sr = audioBuf.sampleRate;
+    const len = audioBuf.length;
+    const hopSec = 0.023;
+    const hop = Math.round(sr * hopSec);
+    const N = Math.floor(len / hop);
 
-  setProgress(5, '⏳ Rendering audio bands…  5%');
-  document.getElementById('btn-play-pause').disabled = true;
-  await new Promise(r => setTimeout(r, 0));
+    setProgress(5, '⏳ Rendering audio bands…  5%');
+    document.getElementById('btn-play-pause').disabled = true;
+    await new Promise(r => setTimeout(r, 0));
 
-  // Stage 1 – offline rendering (heaviest)
-  const [bd, md, hd, fd] = await Promise.all([
-    renderBand(audioBuf,    0,  250),
-    renderBand(audioBuf,  250, 3500),
-    renderBand(audioBuf, 3500,    0),
-    renderBand(audioBuf,    0,    0),
-  ]);
+    // Stage 1 – offline rendering (heaviest)
+    const [bd, md, hd, fd] = await Promise.all([
+      renderBand(audioBuf,    0,  250),
+      renderBand(audioBuf,  250, 3500),
+      renderBand(audioBuf, 3500,    0),
+      renderBand(audioBuf,    0,    0),
+    ]);
 
-  setProgress(32, '⏳ Loading AI Stem Separator…');
+    setProgress(32, '⏳ Loading AI Stem Separator…');
   
   const worker = new Worker(new URL('./ai-worker.js', import.meta.url), { type: 'module' });
   let aiStems = null;
@@ -1383,6 +1404,30 @@ async function analyzeSong(audioBuf, fileName) {
   
   console.log(`Song analyzed: ${beats.length} beats @ ${estimatedBPM} BPM, ${sections.length} sections`);
   return { bassMap, midMap, highMap, melodyMap, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
+  } catch (err) {
+    console.error("Analysis failed, returning fallback map:", err);
+    document.getElementById('btn-play-pause').disabled = false;
+    document.getElementById('btn-render').disabled = false;
+    return {
+      bassMap: new Float32Array(100),
+      midMap: new Float32Array(100),
+      highMap: new Float32Array(100),
+      melodyMap: new Float32Array(100),
+      energyMap: new Float32Array(100),
+      buildUpMap: new Float32Array(100),
+      beats: [{ time: 0, str: 1 }],
+      sections: [{
+        startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+        avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+        bassW: 0.33, midW: 0.33, trebleW: 0.33,
+        seed: 0, id: 0,
+        baseHue: 0, pattern: 'sidesweep',
+        liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+        speedScale: 1, spreadMod: 1
+      }],
+      hopSec: 0.1, hop: 4410, N: 100, bpm: 120
+    };
+  }
 }
 
 // ── Live lookup helpers ───────────────────────────────────────
@@ -1449,9 +1494,22 @@ async function loadAudio(file) {
             audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
             songMap = await analyzeSong(audioBuffer, "Fallback");
             waveformValid = false;
+        } else {
+            throw new Error("No audioCtx available for fallback");
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
+        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
+            audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
+            songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+            waveformValid = false;
+        }
+    } catch (fallbackError) {
+        console.error("Fallback audio generation failed:", fallbackError);
+        audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+        waveformValid = false;
     }
   }
 }
@@ -1479,7 +1537,15 @@ async function togglePlay() {
       songMap = await analyzeSong(audioBuffer, "Fallback");
     } else {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10 };
+      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+      songMap = {
+        bpm: 120,
+        beats: [{ time: 0, str: 1 }],
+        sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
+        bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
+        hopSec: 0.1, N: 100
+      };
+      audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
       songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
     }
   }
@@ -2450,6 +2516,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                                + Math.sin(tAnim * lzf * scatterSpeed * 0.9 + lzp) * 0.9 * sp * scatterWarp;
                     break;
                 }
+                // ─── VORTEX: Spinning motion for synthwave theme ─────────────
+                case 'vortex': {
+                    const vortexSpeed = tAnim * 2.0;
+                    const radius = 0.5 * sp;
+                    // Creates a spinning circle that spirals slightly with frequency
+                    localPan  = Math.sin(vortexSpeed + phaseOff) * radius * (1 + bass * 0.5) + norm2 * 0.3;
+                    localTilt = tiltRad + Math.cos(vortexSpeed + phaseOff) * radius * (1 + mid * 0.5);
+                    break;
+                }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
                 case 'sine': {
                     const waveT = tAnim * lxf * 1.2 + wn * Math.PI * 4.0;
@@ -2475,6 +2550,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 case 'pulse': {
                     localPan = Math.sin(lxp + vOff + tAnim * 0.1) * norm2 * 0.7 * sp;
                     localTilt = tiltRad + Math.cos(lzp + wn * Math.PI) * 0.3 * sp;
+                    break;
+                }
+                // ─── STARBURST ───────────────────────────────────────────
+                case 'starburst': {
+                    localPan = Math.sin(tAnim * lxf * 3.0 + lxp) * 1.5 * sp * (isPeakDrop ? 2.0 : 1.0);
+                    localTilt = tiltRad + Math.cos(tAnim * lyf * 3.0 + lyp) * 0.8 * sp;
                     break;
                 }
                 default: {
@@ -2524,6 +2605,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'pulse') {
                 // Alternate breathing
                 patternOpMod = 0.5 + Math.sin(tAnim * 2.0 + iPhase * Math.PI) * 0.5;
+            } else if (pat === 'starburst') {
+                patternOpMod = (Math.sin(tAnim * 12.0 + i * 5.0) > 0.5) ? 1.0 : 0.2;
             } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
                 patternOpMod = 0.0;
             }
@@ -3166,6 +3249,8 @@ try {
     fallbackDiv.style.zIndex = '9999';
     fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
     document.body.appendChild(fallbackDiv);
+
+    if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
 }
 
 // ─────────────────────────────────────────────
