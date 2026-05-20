@@ -84,7 +84,7 @@ const CFG = {
     cyberpunk:[0xff00ff, 0x00ffff, 0xaa00ff, 0xff0088, 0x00ffaa, 0xffaa00],
     warm:     [0xff2200, 0xff6600, 0xffaa00, 0xff0000, 0xff3300, 0xffcc00],
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
-    synthwave:[0xff00aa, 0x00ffff, 0x9900ff, 0xffaa00, 0xff0055, 0x00ddee],
+    synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
   }
 };
 
@@ -177,8 +177,13 @@ try {
   // Mock renderer to prevent immediate downstream TypeError crashes
   renderer = {
     render: () => {},
-    setAnimationLoop: () => {},
+    setAnimationLoop: (cb) => {
+        function loop() { cb(); requestAnimationFrame(loop); }
+        requestAnimationFrame(loop);
+    },
     setSize: () => {},
+    setPixelRatio: () => {},
+    toneMapping: THREE.NoToneMapping,
     init: async () => {},
     domElement: document.createElement('canvas')
   };
@@ -1040,7 +1045,7 @@ function pickPattern(bass, mid, high, energy, idx) {
   if (energy < 0.15) return ['sidesweep', 'pulse', 'sine'][idx % 3];
   if (energy > 0.80) return ['scatter', 'strobe', 'sparkle', 'chase-fast'][idx % 4];
   if (bass > mid && bass > high)  return ['fan', 'salvo', 'zigzag', 'wave'][idx % 4];
-  if (high > bass && high > mid)  return ['chase-fast', 'sparkle', 'zigzag', 'scatter'][idx % 4];
+  if (high > bass && high > mid)  return ['chase-fast', 'starburst', 'zigzag', 'scatter'][idx % 4];
   return ['wave', 'tunnel', 'chase', 'sine'][idx % 4]; // mid-dominant
 }
 
@@ -1117,8 +1122,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
       wanted = energy > 0.68 ? 'chase-fast' : 'chase';
 
     } else if (trebleDom && energy < 0.50) {
-      // Quiet treble → sparkle (random twinkling fits hi-hats)
-      wanted = 'sparkle';
+      // Quiet treble → starburst (random twinkling fits hi-hats)
+      wanted = 'starburst';
 
     } else if (midDom && melHigh) {
       // Melody lead → wave (smooth travelling ripple follows melodic arc)
@@ -1168,7 +1173,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 async function renderBand(buf, loHz, hiHz) {
   try {
 
-  const ctx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
+  const OfflineAudioCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const ctx = new OfflineAudioCtx(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   let last = src;
@@ -1449,9 +1455,16 @@ async function loadAudio(file) {
             audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
             songMap = await analyzeSong(audioBuffer, "Fallback");
             waveformValid = false;
+        } else {
+            audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
+            songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+            waveformValid = false;
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
+        audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
+        waveformValid = false;
     }
   }
 }
@@ -1479,7 +1492,7 @@ async function togglePlay() {
       songMap = await analyzeSong(audioBuffer, "Fallback");
     } else {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10 };
+      audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
       songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
     }
   }
@@ -2464,6 +2477,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(lzp + wn * Math.PI) * 0.3 * sp;
                     break;
                 }
+                // ─── STARBURST ───────────────────────────────────────────
+                case 'starburst': {
+                    localPan = Math.sin(tAnim * lxf * 3.0 + lxp) * 1.5 * sp * (isPeakDrop ? 2.0 : 1.0);
+                    localTilt = tiltRad + Math.cos(tAnim * lyf * 3.0 + lyp) * 0.8 * sp;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -2511,6 +2530,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'pulse') {
                 // Alternate breathing
                 patternOpMod = 0.5 + Math.sin(tAnim * 2.0 + iPhase * Math.PI) * 0.5;
+            } else if (pat === 'starburst') {
+                patternOpMod = (Math.sin(tAnim * 12.0 + i * 5.0) > 0.5) ? 1.0 : 0.2;
             } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
                 patternOpMod = 0.0;
             }
@@ -3153,6 +3174,8 @@ try {
     fallbackDiv.style.zIndex = '9999';
     fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
     document.body.appendChild(fallbackDiv);
+
+    if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
 }
 
 // ─────────────────────────────────────────────
