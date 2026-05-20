@@ -1075,7 +1075,11 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (!playing || isSilent) {
+  if (CFG.theme === 'synthwave' && playing && !isSilent) {
+    // Force the vortex pattern when the synthwave theme is active and music is playing
+    wanted = 'vortex';
+
+  } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
     wanted = 'sidesweep';
 
@@ -2448,6 +2452,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                                + freqBias * 0.6 * iPhase;
                     localTilt = tiltRad
                                + Math.sin(tAnim * lzf * scatterSpeed * 0.9 + lzp) * 0.9 * sp * scatterWarp;
+                    break;
+                }
+                // ─── VORTEX: Spinning motion for synthwave theme ─────────────
+                case 'vortex': {
+                    const vortexSpeed = tAnim * 2.0;
+                    const radius = 0.5 * sp;
+                    // Creates a spinning circle that spirals slightly with frequency
+                    localPan  = Math.sin(vortexSpeed + phaseOff) * radius * (1 + bass * 0.5) + norm2 * 0.3;
+                    localTilt = tiltRad + Math.cos(vortexSpeed + phaseOff) * radius * (1 + mid * 0.5);
                     break;
                 }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
