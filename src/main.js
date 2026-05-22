@@ -86,6 +86,7 @@ const CFG = {
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
+    ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
   }
 };
 
@@ -1083,6 +1084,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     // Force the vortex pattern when the synthwave theme is active and music is playing
     wanted = 'vortex';
 
+  } else if (CFG.theme === 'ocean' && playing && !isSilent) {
+    wanted = 'ocean-wave';
+
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
     wanted = 'sidesweep';
@@ -1501,14 +1505,6 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
         songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
-            audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
-            songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
-            waveformValid = false;
-        }
-    } catch (fallbackError) {
-        console.error("Fallback audio generation failed:", fallbackError);
-        audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
-        songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
         waveformValid = false;
     }
   }
@@ -2535,6 +2531,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     // Creates a spinning circle that spirals slightly with frequency
                     localPan  = Math.sin(vortexSpeed + phaseOff) * radius * (1 + bass * 0.5) + norm2 * 0.3;
                     localTilt = tiltRad + Math.cos(vortexSpeed + phaseOff) * radius * (1 + mid * 0.5);
+                    break;
+                }
+                // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
+                case 'ocean-wave': {
+                    const waveSpeed = tAnim * 1.5;
+                    const waveAmplitude = 0.8 * sp;
+                    // Creates a rolling wave effect across the lasers
+                    localPan = norm2 * 0.8 * sp + Math.sin(waveSpeed + phaseOff * 0.5) * waveAmplitude * 0.3;
+                    localTilt = tiltRad + Math.sin(waveSpeed * 0.8 + norm2 * Math.PI) * waveAmplitude * (1 + bass * 0.3);
                     break;
                 }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
