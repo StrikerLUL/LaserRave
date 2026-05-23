@@ -1549,10 +1549,18 @@ async function togglePlay() {
 
   if (!audioBuffer) {
     initAudioContext();
+    let createdBuffer = false;
     if (audioCtx) {
-      audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
-      songMap = await analyzeSong(audioBuffer, "Fallback");
-    } else {
+      try {
+        audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+        songMap = await analyzeSong(audioBuffer, "Fallback");
+        createdBuffer = true;
+      } catch (e) {
+        console.warn("Failed to create AudioBuffer, falling back to mock", e);
+      }
+    }
+
+    if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
       songMap = {
@@ -1586,17 +1594,22 @@ async function togglePlay() {
     if (videoObj) videoObj.pause();
   } else {
     if (audioCtx) {
-      source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(analyser);
+      try {
+        source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(analyser);
 
-      try { analyser.disconnect(); } catch(e){}
-      if (mediaStreamDest) analyser.connect(mediaStreamDest);
-      if (!isRecording) analyser.connect(audioCtx.destination);
+        try { analyser.disconnect(); } catch(e){}
+        if (mediaStreamDest) analyser.connect(mediaStreamDest);
+        if (!isRecording) analyser.connect(audioCtx.destination);
 
-      source.loop = true;
-      source.start(0, playbackStartOffset % audioBuffer.duration);
-      playbackStartCtxTime = audioCtx.currentTime;
+        source.loop = true;
+        source.start(0, playbackStartOffset % audioBuffer.duration);
+        playbackStartCtxTime = audioCtx.currentTime;
+      } catch (e) {
+        console.error("Failed to start audio buffer source", e);
+        playbackStartCtxTime = performance.now() / 1000;
+      }
     } else {
       playbackStartCtxTime = performance.now() / 1000;
     }
@@ -1774,14 +1787,18 @@ document.getElementById('video-upload').addEventListener('change', e => {
   if (playing) videoObj.play().catch(console.error);
   
   if (videoTexture) videoTexture.dispose();
-  videoTexture = new THREE.VideoTexture(videoObj);
-  videoTexture.minFilter = THREE.LinearFilter;
-  videoTexture.magFilter = THREE.LinearFilter;
-  
-  if (ledScreenMat) {
-      ledScreenMat.map = videoTexture;
-      ledScreenMat.needsUpdate = true;
-      ledScreenMat.color.setHex(0xffffff);
+  try {
+    videoTexture = new THREE.VideoTexture(videoObj);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+
+    if (ledScreenMat) {
+        ledScreenMat.map = videoTexture;
+        ledScreenMat.needsUpdate = true;
+        ledScreenMat.color.setHex(0xffffff);
+    }
+  } catch (err) {
+    console.error("Failed to create VideoTexture:", err);
   }
 });
 document.getElementById('param-autocam').addEventListener('change', e => {
@@ -3286,44 +3303,70 @@ function animate() {
   }
 }
 
-try {
-    if (renderer.init) {
-        await renderer.init();
+async function initRenderer() {
+    try {
+        if (renderer.init) {
+            await renderer.init();
+        }
+        renderer.setAnimationLoop(animate);
+    } catch (e) {
+        console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+
+        try {
+            // Remove the failed WebGPURenderer DOM element
+            if (renderer.domElement && renderer.domElement.parentNode) {
+                renderer.domElement.parentNode.removeChild(renderer.domElement);
+            }
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                powerPreference: "high-performance"
+            });
+            renderer.setSize(W, H);
+            renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+            renderer.toneMapping = THREE.NoToneMapping;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // PostProcessing might need to be re-initialized for WebGL if it was WebGPU
+            postProcessing = null;
+
+            renderer.setAnimationLoop(animate);
+        } catch (webglError) {
+            console.error("Critical renderer initialization error (WebGL fallback failed):", webglError);
+            const fallbackDiv = document.createElement('div');
+            fallbackDiv.style.position = 'absolute';
+            fallbackDiv.style.top = '50%';
+            fallbackDiv.style.left = '50%';
+            fallbackDiv.style.transform = 'translate(-50%, -50%)';
+            fallbackDiv.style.color = 'white';
+            fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+            fallbackDiv.style.padding = '20px';
+            fallbackDiv.style.borderRadius = '10px';
+            fallbackDiv.style.fontFamily = 'sans-serif';
+            fallbackDiv.style.zIndex = '9999';
+            fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
+            document.body.appendChild(fallbackDiv);
+
+            // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
+            renderer = {
+                render: () => {},
+                setAnimationLoop: (cb) => {
+                    function loop() { cb(); requestAnimationFrame(loop); }
+                    requestAnimationFrame(loop);
+                },
+                setSize: () => {},
+                setPixelRatio: () => {},
+                toneMapping: THREE.NoToneMapping,
+                init: async () => {},
+                domElement: document.createElement('canvas')
+            };
+            postProcessing = null;
+
+            if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
+        }
     }
-    renderer.setAnimationLoop(animate);
-} catch (e) {
-    console.error("Renderer init failed", e);
-    const fallbackDiv = document.createElement('div');
-    fallbackDiv.style.position = 'absolute';
-    fallbackDiv.style.top = '50%';
-    fallbackDiv.style.left = '50%';
-    fallbackDiv.style.transform = 'translate(-50%, -50%)';
-    fallbackDiv.style.color = 'white';
-    fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
-    fallbackDiv.style.padding = '20px';
-    fallbackDiv.style.borderRadius = '10px';
-    fallbackDiv.style.fontFamily = 'sans-serif';
-    fallbackDiv.style.zIndex = '9999';
-    fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
-    document.body.appendChild(fallbackDiv);
-
-    // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
-    renderer = {
-        render: () => {},
-        setAnimationLoop: (cb) => {
-            function loop() { cb(); requestAnimationFrame(loop); }
-            requestAnimationFrame(loop);
-        },
-        setSize: () => {},
-        setPixelRatio: () => {},
-        toneMapping: THREE.NoToneMapping,
-        init: async () => {},
-        domElement: document.createElement('canvas')
-    };
-    postProcessing = null;
-
-    if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
 }
+initRenderer();
 
 // ─────────────────────────────────────────────
 //  PYRO UI LISTENERS
@@ -3505,20 +3548,28 @@ document.getElementById('btn-screenshot').addEventListener('click', () => {
 });
 
 function saveScreenshot() {
-  renderer.domElement.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = `lasershow_screenshot_${Date.now()}.png`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
-  }, 'image/png');
+  try {
+    if (!renderer || !renderer.domElement || typeof renderer.domElement.toBlob !== 'function') {
+        console.warn("Screenshot feature is not supported without a valid canvas domElement.");
+        return;
+    }
+    renderer.domElement.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `lasershow_screenshot_${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    }, 'image/png');
+  } catch (err) {
+    console.error("Failed to capture screenshot:", err);
+  }
 }
 
 document.getElementById('btn-render').addEventListener('click', async () => {
@@ -3580,55 +3631,60 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     const startRealTime = performance.now();
     
     // Render loop
-    for (let f = 0; f < totalFrames; f++) {
-        const frameTime = f / fps;
-        
-        // Setup internal time variables to fake the playhead
-        playbackStartCtxTime = audioCtx.currentTime; 
-        playbackStartOffset = frameTime;
-        playing = true; // force simulate live behavior
-        
-        // Multi-sample Motion Blur Loop
-        // We step 't' very slightly to generate blur
-        for(let s=0; s<motionBlurSamples; s++) {
-            const subTimeOffset = (s / motionBlurSamples) * (1/fps);
-            playbackStartOffset = frameTime + subTimeOffset;
+    try {
+        for (let f = 0; f < totalFrames; f++) {
+            const frameTime = f / fps;
             
-            // Re-eval animate state manually without requestAnimationFrame
-            animate(); 
-        }
-        
-        // Encode the accumulated frame
-        // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
-        const bmp = await createImageBitmap(renderer.domElement);
-        const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
-        encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
-        vFrame.close();
-        bmp.close();
-        
-        // Throttle to prevent WebCodecs queue explosion which causes silent crashes
-        while (encoder.encodeQueueSize > 5) {
-            await new Promise(r => setTimeout(r, 5));
-        }
-        
-        if (f % 5 === 0) {
-            const pct = (f / totalFrames) * 100;
-            prog.style.width = pct + '%';
-            stat.innerText = `Rendering: ${f} / ${totalFrames} frames`;
+            // Setup internal time variables to fake the playhead
+            playbackStartCtxTime = audioCtx.currentTime;
+            playbackStartOffset = frameTime;
+            playing = true; // force simulate live behavior
             
-            const elapsed = (performance.now() - startRealTime) / 1000;
-            const tpf = elapsed / (f + 1);
-            const remain = (totalFrames - f) * tpf;
-            eta.innerText = `ETA: ${Math.round(remain)} seconds`;
+            // Multi-sample Motion Blur Loop
+            // We step 't' very slightly to generate blur
+            for(let s=0; s<motionBlurSamples; s++) {
+                const subTimeOffset = (s / motionBlurSamples) * (1/fps);
+                playbackStartOffset = frameTime + subTimeOffset;
+
+                // Re-eval animate state manually without requestAnimationFrame
+                animate();
+            }
+
+            // Encode the accumulated frame
+            // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
+            const bmp = await createImageBitmap(renderer.domElement);
+            const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
+            encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
+            vFrame.close();
+            bmp.close();
             
-            // Yield to browser to update UI
-            await new Promise(r => setTimeout(r, 0));
+            // Throttle to prevent WebCodecs queue explosion which causes silent crashes
+            while (encoder.encodeQueueSize > 5) {
+                await new Promise(r => setTimeout(r, 5));
+            }
+
+            if (f % 5 === 0) {
+                const pct = (f / totalFrames) * 100;
+                prog.style.width = pct + '%';
+                stat.innerText = `Rendering: ${f} / ${totalFrames} frames`;
+
+                const elapsed = (performance.now() - startRealTime) / 1000;
+                const tpf = elapsed / (f + 1);
+                const remain = (totalFrames - f) * tpf;
+                eta.innerText = `ETA: ${Math.round(remain)} seconds`;
+
+                // Yield to browser to update UI
+                await new Promise(r => setTimeout(r, 0));
+            }
         }
+
+        stat.innerText = `Finalizing video file...`;
+        await encoder.flush();
+        encoder.close();
+    } catch (e) {
+        console.error("4K render loop failed:", e);
+        alert("Render fehlgeschlagen. WebCodecs oder Canvas-Export wird nicht vollständig unterstützt.");
     }
-    
-    stat.innerText = `Finalizing video file...`;
-    await encoder.flush();
-    encoder.close();
     
     // Reconstruct fake webm/mkv format or return raw chunks
     // *Warning: vp8 raw chunks need to be muxed. 
