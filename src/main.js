@@ -87,6 +87,7 @@ const CFG = {
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
     ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
+    aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
   }
 };
 
@@ -1086,6 +1087,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'ocean' && playing && !isSilent) {
     wanted = 'ocean-wave';
+
+  } else if (CFG.theme === 'aurora' && playing && !isSilent) {
+    wanted = 'aurora-flow';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -2540,6 +2544,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     // Creates a rolling wave effect across the lasers
                     localPan = norm2 * 0.8 * sp + Math.sin(waveSpeed + phaseOff * 0.5) * waveAmplitude * 0.3;
                     localTilt = tiltRad + Math.sin(waveSpeed * 0.8 + norm2 * Math.PI) * waveAmplitude * (1 + bass * 0.3);
+                    break;
+                }
+                // ─── AURORA-FLOW: Ethereal flowing pattern for aurora theme ─────────
+                case 'aurora-flow': {
+                    const flowSpeed = tAnim * 0.5;
+                    // Creates a smooth, sweeping vertical/horizontal ribbon effect
+                    localPan = norm2 * sp + Math.sin(flowSpeed + lxf * 2.0) * 0.6 * sp;
+                    localTilt = tiltRad + (Math.sin(flowSpeed * 1.2 + lyf * Math.PI) * 0.4 + Math.cos(flowSpeed * 0.8 + lzf * 2.0) * 0.3) * sp * (1 + energy * 0.2);
                     break;
                 }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
