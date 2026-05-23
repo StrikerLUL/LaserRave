@@ -188,7 +188,6 @@ try {
     setPixelRatio: () => {},
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
-    toneMapping: THREE.NoToneMapping,
     domElement: document.createElement('canvas')
   };
 }
@@ -1195,8 +1194,6 @@ async function renderBand(buf, loHz, hiHz) {
   }
 
   const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
-  const OfflineAudioCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const ctx = new OfflineAudioCtx(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   let last = src;
@@ -1426,6 +1423,7 @@ async function analyzeSong(audioBuf, fileName) {
       beats: [{ time: 0, str: 1 }],
       sections: [{
         startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+        start: 0, end: 10, intensity: 1, type: "drop",
         avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
         bassW: 0.33, midW: 0.33, trebleW: 0.33,
         seed: 0, id: 0,
@@ -1508,7 +1506,26 @@ async function loadAudio(file) {
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
         audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
-        songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
+        songMap = {
+            bassMap: new Float32Array(100),
+            midMap: new Float32Array(100),
+            highMap: new Float32Array(100),
+            melodyMap: new Float32Array(100),
+            energyMap: new Float32Array(100),
+            buildUpMap: new Float32Array(100),
+            beats: [{ time: 0, str: 1 }],
+            sections: [{
+                startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+                start: 0, end: 10, intensity: 1, type: "drop",
+                avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+                bassW: 0.33, midW: 0.33, trebleW: 0.33,
+                seed: 0, id: 0,
+                baseHue: 0, pattern: 'sidesweep',
+                liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+                speedScale: 1, spreadMod: 1
+            }],
+            hopSec: 0.1, hop: 4410, N: 100, bpm: 120
+        };
         waveformValid = false;
     }
   }
@@ -1539,14 +1556,25 @@ async function togglePlay() {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
       songMap = {
-        bpm: 120,
-        beats: [{ time: 0, str: 1 }],
-        sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-        bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
-        hopSec: 0.1, N: 100
+          bassMap: new Float32Array(100),
+          midMap: new Float32Array(100),
+          highMap: new Float32Array(100),
+          melodyMap: new Float32Array(100),
+          energyMap: new Float32Array(100),
+          buildUpMap: new Float32Array(100),
+          beats: [{ time: 0, str: 1 }],
+          sections: [{
+              startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+              start: 0, end: 10, intensity: 1, type: "drop",
+              avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+              bassW: 0.33, midW: 0.33, trebleW: 0.33,
+              seed: 0, id: 0,
+              baseHue: 0, pattern: 'sidesweep',
+              liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+              speedScale: 1, spreadMod: 1
+          }],
+          hopSec: 0.1, hop: 4410, N: 100, bpm: 120
       };
-      audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
-      songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
     }
   }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
