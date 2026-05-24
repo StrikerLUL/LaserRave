@@ -88,6 +88,7 @@ const CFG = {
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
     ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
     aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
+    neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
   }
 };
 
@@ -1089,6 +1090,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'aurora' && playing && !isSilent) {
     wanted = 'aurora-flow';
+
+  } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
+    wanted = 'dna';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -2563,6 +2567,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     // Creates a spinning circle that spirals slightly with frequency
                     localPan  = Math.sin(vortexSpeed + phaseOff) * radius * (1 + bass * 0.5) + norm2 * 0.3;
                     localTilt = tiltRad + Math.cos(vortexSpeed + phaseOff) * radius * (1 + mid * 0.5);
+                    break;
+                }
+                // ─── DNA: Double Helix for neoncity theme ────────────────────
+                case 'dna': {
+                    const strand = i % 2 === 0 ? 1 : -1;
+                    const dnaPhase = tAnim * lxf * 1.5 + wn * Math.PI * 6.0;
+                    localPan  = Math.sin(dnaPhase) * 0.6 * sp * strand + mid * 0.1;
+                    localTilt = tiltRad + Math.cos(dnaPhase) * 0.4 * sp * strand + bass * 0.2;
                     break;
                 }
                 // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
