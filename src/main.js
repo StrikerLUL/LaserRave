@@ -3620,22 +3620,34 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     // and store frames via WebCodecs VideoEncoder to an array of chunks!
     
     let encoderChunks = [];
-    const init = {
-        output: (chunk, meta) => {
-            const buf = new Uint8Array(chunk.byteLength);
-            chunk.copyTo(buf);
-            encoderChunks.push(buf);
-        },
-        error: (e) => console.error("VideoEncoder Error", e)
-    };
-    const encoder = new VideoEncoder(init);
-    // Simple codec configuration
-    encoder.configure({
-        codec: 'vp8',
-        width: R_WIDTH,
-        height: R_HEIGHT,
-        bitrate: 40_000_000 // 40 Mbps
-    });
+    let encoder;
+    try {
+        const init = {
+            output: (chunk, meta) => {
+                const buf = new Uint8Array(chunk.byteLength);
+                chunk.copyTo(buf);
+                encoderChunks.push(buf);
+            },
+            error: (e) => console.error("VideoEncoder Error", e)
+        };
+        encoder = new VideoEncoder(init);
+        // Simple codec configuration
+        encoder.configure({
+            codec: 'vp8',
+            width: R_WIDTH,
+            height: R_HEIGHT,
+            bitrate: 40_000_000 // 40 Mbps
+        });
+    } catch (e) {
+        console.error("VideoEncoder initialization failed:", e);
+        alert("4K Export / WebCodecs is not supported in this browser.");
+        ui.style.display = 'none';
+        playing = false;
+        isRecording = false;
+        isOfflineRendering = false;
+        animate(); // Restart real-time loop
+        return;
+    }
 
     // Resize renderer for 4K
     renderer.setSize(R_WIDTH, R_HEIGHT);
@@ -3664,11 +3676,15 @@ document.getElementById('btn-render').addEventListener('click', async () => {
 
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
-            const bmp = await createImageBitmap(renderer.domElement);
-            const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
-            encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
-            vFrame.close();
-            bmp.close();
+            try {
+                const bmp = await createImageBitmap(renderer.domElement);
+                const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
+                encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
+                vFrame.close();
+                bmp.close();
+            } catch (err) {
+                console.warn("Failed to capture frame with createImageBitmap:", err);
+            }
             
             // Throttle to prevent WebCodecs queue explosion which causes silent crashes
             while (encoder.encodeQueueSize > 5) {
