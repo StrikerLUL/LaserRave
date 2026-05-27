@@ -90,6 +90,7 @@ const CFG = {
     ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
     aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
     neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
+    quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
   }
 };
 
@@ -1098,6 +1099,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
+
+  } else if (CFG.theme === 'quasar' && playing && !isSilent) {
+    wanted = 'quasar-spin';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -2605,6 +2609,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const dnaPhase = tAnim * lxf * 1.5 + wn * Math.PI * 6.0;
                     localPan  = Math.sin(dnaPhase) * 0.6 * sp * strand + mid * 0.1;
                     localTilt = tiltRad + Math.cos(dnaPhase) * 0.4 * sp * strand + bass * 0.2;
+                    break;
+                }
+                // ─── QUASAR-SPIN: Fast expanding/contracting spin for quasar theme ──
+                case 'quasar-spin': {
+                    const spinSpeed = tAnim * 3.5;
+                    const expandRadius = 0.3 * sp + bass * 0.8 * sp;
+                    const angle = spinSpeed + (i / CFG.laserCount) * Math.PI * 8.0;
+                    localPan = Math.cos(angle) * expandRadius + (kick * (Math.random() - 0.5) * 0.5);
+                    localTilt = tiltRad + Math.sin(angle) * expandRadius + (kick * (Math.random() - 0.5) * 0.5);
                     break;
                 }
                 // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
