@@ -86,10 +86,12 @@ const CFG = {
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
+    ocean:    [0x001133, 0x0055ff, 0x00aaff, 0x00ffff, 0x00ffcc, 0x1177aa],
     ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
     aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
     neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
     cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
+    quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
   }
 };
 
@@ -1082,7 +1084,11 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (CFG.theme === 'synthwave' && playing && !isSilent) {
+  if (CFG.theme === 'ocean' && playing && !isSilent) {
+    // Force the liquid pattern when the ocean theme is active and music is playing
+    wanted = 'liquid';
+
+  } else if (CFG.theme === 'synthwave' && playing && !isSilent) {
     // Force the vortex pattern when the synthwave theme is active and music is playing
     wanted = 'vortex';
 
@@ -1097,6 +1103,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'supernova';
+  } else if (CFG.theme === 'quasar' && playing && !isSilent) {
+    wanted = 'quasar-spin';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -1514,6 +1522,7 @@ async function loadAudio(file) {
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
         audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -2590,6 +2599,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(vortexSpeed + phaseOff) * radius * (1 + mid * 0.5);
                     break;
                 }
+                // ─── LIQUID: Fluid, overlapping sine waves for Ocean theme ───
+                case 'liquid': {
+                    const liquidSpeed = tAnim * 0.8;
+                    const wave1 = Math.sin(liquidSpeed + wn * Math.PI * 2.0);
+                    const wave2 = Math.cos(liquidSpeed * 1.3 + phaseOff * 0.5);
+                    localPan = (wave1 * 0.6 + wave2 * 0.4) * sp;
+                    localTilt = tiltRad + (Math.sin(liquidSpeed * 0.7 + phaseOff) * 0.3) * sp + (mid * 0.1);
                 // ─── DNA: Double Helix for neoncity theme ────────────────────
                 case 'dna': {
                     const strand = i % 2 === 0 ? 1 : -1;
@@ -2610,6 +2626,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                         localPan += (Math.random() - 0.5) * 0.1;
                         localTilt += (Math.random() - 0.5) * 0.1;
                     }
+                // ─── QUASAR-SPIN: Fast expanding/contracting spin for quasar theme ──
+                case 'quasar-spin': {
+                    const spinSpeed = tAnim * 3.5;
+                    const expandRadius = 0.3 * sp + bass * 0.8 * sp;
+                    const angle = spinSpeed + (i / CFG.laserCount) * Math.PI * 8.0;
+                    localPan = Math.cos(angle) * expandRadius + (kick * (Math.random() - 0.5) * 0.5);
+                    localTilt = tiltRad + Math.sin(angle) * expandRadius + (kick * (Math.random() - 0.5) * 0.5);
                     break;
                 }
                 // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
@@ -2713,6 +2736,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 patternOpMod = (Math.sin(tAnim * 12.0 + i * 5.0) > 0.5) ? 1.0 : 0.2;
             } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
                 patternOpMod = 0.0;
+            } else if (pat === 'liquid') {
+                // Smooth undulating opacity
+                patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
             }
         }
 
@@ -3638,22 +3664,34 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     // and store frames via WebCodecs VideoEncoder to an array of chunks!
     
     let encoderChunks = [];
-    const init = {
-        output: (chunk, meta) => {
-            const buf = new Uint8Array(chunk.byteLength);
-            chunk.copyTo(buf);
-            encoderChunks.push(buf);
-        },
-        error: (e) => console.error("VideoEncoder Error", e)
-    };
-    const encoder = new VideoEncoder(init);
-    // Simple codec configuration
-    encoder.configure({
-        codec: 'vp8',
-        width: R_WIDTH,
-        height: R_HEIGHT,
-        bitrate: 40_000_000 // 40 Mbps
-    });
+    let encoder;
+    try {
+        const init = {
+            output: (chunk, meta) => {
+                const buf = new Uint8Array(chunk.byteLength);
+                chunk.copyTo(buf);
+                encoderChunks.push(buf);
+            },
+            error: (e) => console.error("VideoEncoder Error", e)
+        };
+        encoder = new VideoEncoder(init);
+        // Simple codec configuration
+        encoder.configure({
+            codec: 'vp8',
+            width: R_WIDTH,
+            height: R_HEIGHT,
+            bitrate: 40_000_000 // 40 Mbps
+        });
+    } catch (e) {
+        console.error("VideoEncoder initialization failed:", e);
+        alert("4K Export / WebCodecs is not supported in this browser.");
+        ui.style.display = 'none';
+        playing = false;
+        isRecording = false;
+        isOfflineRendering = false;
+        animate(); // Restart real-time loop
+        return;
+    }
 
     // Resize renderer for 4K
     renderer.setSize(R_WIDTH, R_HEIGHT);
@@ -3682,11 +3720,15 @@ document.getElementById('btn-render').addEventListener('click', async () => {
 
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
-            const bmp = await createImageBitmap(renderer.domElement);
-            const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
-            encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
-            vFrame.close();
-            bmp.close();
+            try {
+                const bmp = await createImageBitmap(renderer.domElement);
+                const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
+                encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
+                vFrame.close();
+                bmp.close();
+            } catch (err) {
+                console.warn("Failed to capture frame with createImageBitmap:", err);
+            }
             
             // Throttle to prevent WebCodecs queue explosion which causes silent crashes
             while (encoder.encodeQueueSize > 5) {
