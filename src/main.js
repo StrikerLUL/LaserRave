@@ -89,6 +89,7 @@ const CFG = {
     ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
     aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
     neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
+    cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
   }
 };
 
@@ -1093,6 +1094,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
+
+  } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
+    wanted = 'supernova';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -2592,6 +2596,20 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const dnaPhase = tAnim * lxf * 1.5 + wn * Math.PI * 6.0;
                     localPan  = Math.sin(dnaPhase) * 0.6 * sp * strand + mid * 0.1;
                     localTilt = tiltRad + Math.cos(dnaPhase) * 0.4 * sp * strand + bass * 0.2;
+                    break;
+                }
+                // ─── SUPERNOVA: Cosmic expanding/contracting effect ──────────
+                case 'supernova': {
+                    const novaSpeed = tAnim * 2.5;
+                    const expandRadius = 0.3 + Math.sin(novaSpeed * 0.5) * 0.7; // Breathing expansion
+                    const angle = novaSpeed + (i / CFG.laserCount) * Math.PI * 8; // Bursting angles
+                    localPan = Math.cos(angle) * expandRadius * sp * (1 + buildUp * 0.5);
+                    localTilt = tiltRad + Math.sin(angle) * expandRadius * sp * (1 + buildUp * 0.5);
+
+                    if (energy > 0.8) {
+                        localPan += (Math.random() - 0.5) * 0.1;
+                        localTilt += (Math.random() - 0.5) * 0.1;
+                    }
                     break;
                 }
                 // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
