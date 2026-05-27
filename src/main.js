@@ -87,6 +87,9 @@ const CFG = {
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
     ocean:    [0x001133, 0x0055ff, 0x00aaff, 0x00ffff, 0x00ffcc, 0x1177aa],
+    ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
+    aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
+    neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
   }
 };
 
@@ -187,7 +190,6 @@ try {
     setPixelRatio: () => {},
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
-    toneMapping: THREE.NoToneMapping,
     domElement: document.createElement('canvas')
   };
 }
@@ -1088,6 +1090,15 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     // Force the vortex pattern when the synthwave theme is active and music is playing
     wanted = 'vortex';
 
+  } else if (CFG.theme === 'ocean' && playing && !isSilent) {
+    wanted = 'ocean-wave';
+
+  } else if (CFG.theme === 'aurora' && playing && !isSilent) {
+    wanted = 'aurora-flow';
+
+  } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
+    wanted = 'dna';
+
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
     wanted = 'sidesweep';
@@ -1192,8 +1203,6 @@ async function renderBand(buf, loHz, hiHz) {
   }
 
   const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
-  const OfflineAudioCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const ctx = new OfflineAudioCtx(1, buf.length, buf.sampleRate);
   const src = ctx.createBufferSource();
   src.buffer = buf;
   let last = src;
@@ -1423,6 +1432,7 @@ async function analyzeSong(audioBuf, fileName) {
       beats: [{ time: 0, str: 1 }],
       sections: [{
         startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+        start: 0, end: 10, intensity: 1, type: "drop",
         avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
         bassW: 0.33, midW: 0.33, trebleW: 0.33,
         seed: 0, id: 0,
@@ -1506,6 +1516,26 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
         songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
+        songMap = {
+            bassMap: new Float32Array(100),
+            midMap: new Float32Array(100),
+            highMap: new Float32Array(100),
+            melodyMap: new Float32Array(100),
+            energyMap: new Float32Array(100),
+            buildUpMap: new Float32Array(100),
+            beats: [{ time: 0, str: 1 }],
+            sections: [{
+                startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+                start: 0, end: 10, intensity: 1, type: "drop",
+                avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+                bassW: 0.33, midW: 0.33, trebleW: 0.33,
+                seed: 0, id: 0,
+                baseHue: 0, pattern: 'sidesweep',
+                liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+                speedScale: 1, spreadMod: 1
+            }],
+            hopSec: 0.1, hop: 4410, N: 100, bpm: 120
+        };
         waveformValid = false;
     }
   }
@@ -1529,21 +1559,40 @@ async function togglePlay() {
 
   if (!audioBuffer) {
     initAudioContext();
+    let createdBuffer = false;
     if (audioCtx) {
-      audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
-      songMap = await analyzeSong(audioBuffer, "Fallback");
-    } else {
+      try {
+        audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+        songMap = await analyzeSong(audioBuffer, "Fallback");
+        createdBuffer = true;
+      } catch (e) {
+        console.warn("Failed to create AudioBuffer, falling back to mock", e);
+      }
+    }
+
+    if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
       songMap = {
-        bpm: 120,
-        beats: [{ time: 0, str: 1 }],
-        sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-        bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
-        hopSec: 0.1, N: 100
+          bassMap: new Float32Array(100),
+          midMap: new Float32Array(100),
+          highMap: new Float32Array(100),
+          melodyMap: new Float32Array(100),
+          energyMap: new Float32Array(100),
+          buildUpMap: new Float32Array(100),
+          beats: [{ time: 0, str: 1 }],
+          sections: [{
+              startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+              start: 0, end: 10, intensity: 1, type: "drop",
+              avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+              bassW: 0.33, midW: 0.33, trebleW: 0.33,
+              seed: 0, id: 0,
+              baseHue: 0, pattern: 'sidesweep',
+              liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+              speedScale: 1, spreadMod: 1
+          }],
+          hopSec: 0.1, hop: 4410, N: 100, bpm: 120
       };
-      audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, getChannelData: () => new Float32Array(441000) };
-      songMap = { bpm: 120, sections: [{ start: 0, end: 10, intensity: 1, type: "drop" }] };
     }
   }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
@@ -1555,17 +1604,22 @@ async function togglePlay() {
     if (videoObj) videoObj.pause();
   } else {
     if (audioCtx) {
-      source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(analyser);
+      try {
+        source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(analyser);
 
-      try { analyser.disconnect(); } catch(e){}
-      if (mediaStreamDest) analyser.connect(mediaStreamDest);
-      if (!isRecording) analyser.connect(audioCtx.destination);
+        try { analyser.disconnect(); } catch(e){}
+        if (mediaStreamDest) analyser.connect(mediaStreamDest);
+        if (!isRecording) analyser.connect(audioCtx.destination);
 
-      source.loop = true;
-      source.start(0, playbackStartOffset % audioBuffer.duration);
-      playbackStartCtxTime = audioCtx.currentTime;
+        source.loop = true;
+        source.start(0, playbackStartOffset % audioBuffer.duration);
+        playbackStartCtxTime = audioCtx.currentTime;
+      } catch (e) {
+        console.error("Failed to start audio buffer source", e);
+        playbackStartCtxTime = performance.now() / 1000;
+      }
     } else {
       playbackStartCtxTime = performance.now() / 1000;
     }
@@ -1743,14 +1797,18 @@ document.getElementById('video-upload').addEventListener('change', e => {
   if (playing) videoObj.play().catch(console.error);
   
   if (videoTexture) videoTexture.dispose();
-  videoTexture = new THREE.VideoTexture(videoObj);
-  videoTexture.minFilter = THREE.LinearFilter;
-  videoTexture.magFilter = THREE.LinearFilter;
-  
-  if (ledScreenMat) {
-      ledScreenMat.map = videoTexture;
-      ledScreenMat.needsUpdate = true;
-      ledScreenMat.color.setHex(0xffffff);
+  try {
+    videoTexture = new THREE.VideoTexture(videoObj);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+
+    if (ledScreenMat) {
+        ledScreenMat.map = videoTexture;
+        ledScreenMat.needsUpdate = true;
+        ledScreenMat.color.setHex(0xffffff);
+    }
+  } catch (err) {
+    console.error("Failed to create VideoTexture:", err);
   }
 });
 document.getElementById('param-autocam').addEventListener('change', e => {
@@ -2541,6 +2599,29 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const wave2 = Math.cos(liquidSpeed * 1.3 + phaseOff * 0.5);
                     localPan = (wave1 * 0.6 + wave2 * 0.4) * sp;
                     localTilt = tiltRad + (Math.sin(liquidSpeed * 0.7 + phaseOff) * 0.3) * sp + (mid * 0.1);
+                // ─── DNA: Double Helix for neoncity theme ────────────────────
+                case 'dna': {
+                    const strand = i % 2 === 0 ? 1 : -1;
+                    const dnaPhase = tAnim * lxf * 1.5 + wn * Math.PI * 6.0;
+                    localPan  = Math.sin(dnaPhase) * 0.6 * sp * strand + mid * 0.1;
+                    localTilt = tiltRad + Math.cos(dnaPhase) * 0.4 * sp * strand + bass * 0.2;
+                    break;
+                }
+                // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
+                case 'ocean-wave': {
+                    const waveSpeed = tAnim * 1.5;
+                    const waveAmplitude = 0.8 * sp;
+                    // Creates a rolling wave effect across the lasers
+                    localPan = norm2 * 0.8 * sp + Math.sin(waveSpeed + phaseOff * 0.5) * waveAmplitude * 0.3;
+                    localTilt = tiltRad + Math.sin(waveSpeed * 0.8 + norm2 * Math.PI) * waveAmplitude * (1 + bass * 0.3);
+                    break;
+                }
+                // ─── AURORA-FLOW: Ethereal flowing pattern for aurora theme ─────────
+                case 'aurora-flow': {
+                    const flowSpeed = tAnim * 0.5;
+                    // Creates a smooth, sweeping vertical/horizontal ribbon effect
+                    localPan = norm2 * sp + Math.sin(flowSpeed + lxf * 2.0) * 0.6 * sp;
+                    localTilt = tiltRad + (Math.sin(flowSpeed * 1.2 + lyf * Math.PI) * 0.4 + Math.cos(flowSpeed * 0.8 + lzf * 2.0) * 0.3) * sp * (1 + energy * 0.2);
                     break;
                 }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
@@ -3250,44 +3331,70 @@ function animate() {
   }
 }
 
-try {
-    if (renderer.init) {
-        await renderer.init();
+async function initRenderer() {
+    try {
+        if (renderer.init) {
+            await renderer.init();
+        }
+        renderer.setAnimationLoop(animate);
+    } catch (e) {
+        console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+
+        try {
+            // Remove the failed WebGPURenderer DOM element
+            if (renderer.domElement && renderer.domElement.parentNode) {
+                renderer.domElement.parentNode.removeChild(renderer.domElement);
+            }
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                powerPreference: "high-performance"
+            });
+            renderer.setSize(W, H);
+            renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+            renderer.toneMapping = THREE.NoToneMapping;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // PostProcessing might need to be re-initialized for WebGL if it was WebGPU
+            postProcessing = null;
+
+            renderer.setAnimationLoop(animate);
+        } catch (webglError) {
+            console.error("Critical renderer initialization error (WebGL fallback failed):", webglError);
+            const fallbackDiv = document.createElement('div');
+            fallbackDiv.style.position = 'absolute';
+            fallbackDiv.style.top = '50%';
+            fallbackDiv.style.left = '50%';
+            fallbackDiv.style.transform = 'translate(-50%, -50%)';
+            fallbackDiv.style.color = 'white';
+            fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+            fallbackDiv.style.padding = '20px';
+            fallbackDiv.style.borderRadius = '10px';
+            fallbackDiv.style.fontFamily = 'sans-serif';
+            fallbackDiv.style.zIndex = '9999';
+            fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
+            document.body.appendChild(fallbackDiv);
+
+            // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
+            renderer = {
+                render: () => {},
+                setAnimationLoop: (cb) => {
+                    function loop() { cb(); requestAnimationFrame(loop); }
+                    requestAnimationFrame(loop);
+                },
+                setSize: () => {},
+                setPixelRatio: () => {},
+                toneMapping: THREE.NoToneMapping,
+                init: async () => {},
+                domElement: document.createElement('canvas')
+            };
+            postProcessing = null;
+
+            if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
+        }
     }
-    renderer.setAnimationLoop(animate);
-} catch (e) {
-    console.error("Renderer init failed", e);
-    const fallbackDiv = document.createElement('div');
-    fallbackDiv.style.position = 'absolute';
-    fallbackDiv.style.top = '50%';
-    fallbackDiv.style.left = '50%';
-    fallbackDiv.style.transform = 'translate(-50%, -50%)';
-    fallbackDiv.style.color = 'white';
-    fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
-    fallbackDiv.style.padding = '20px';
-    fallbackDiv.style.borderRadius = '10px';
-    fallbackDiv.style.fontFamily = 'sans-serif';
-    fallbackDiv.style.zIndex = '9999';
-    fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
-    document.body.appendChild(fallbackDiv);
-
-    // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
-    renderer = {
-        render: () => {},
-        setAnimationLoop: (cb) => {
-            function loop() { cb(); requestAnimationFrame(loop); }
-            requestAnimationFrame(loop);
-        },
-        setSize: () => {},
-        setPixelRatio: () => {},
-        toneMapping: THREE.NoToneMapping,
-        init: async () => {},
-        domElement: document.createElement('canvas')
-    };
-    postProcessing = null;
-
-    if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
 }
+initRenderer();
 
 // ─────────────────────────────────────────────
 //  PYRO UI LISTENERS
@@ -3469,20 +3576,28 @@ document.getElementById('btn-screenshot').addEventListener('click', () => {
 });
 
 function saveScreenshot() {
-  renderer.domElement.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = `lasershow_screenshot_${Date.now()}.png`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
-  }, 'image/png');
+  try {
+    if (!renderer || !renderer.domElement || typeof renderer.domElement.toBlob !== 'function') {
+        console.warn("Screenshot feature is not supported without a valid canvas domElement.");
+        return;
+    }
+    renderer.domElement.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `lasershow_screenshot_${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    }, 'image/png');
+  } catch (err) {
+    console.error("Failed to capture screenshot:", err);
+  }
 }
 
 document.getElementById('btn-render').addEventListener('click', async () => {
@@ -3544,55 +3659,60 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     const startRealTime = performance.now();
     
     // Render loop
-    for (let f = 0; f < totalFrames; f++) {
-        const frameTime = f / fps;
-        
-        // Setup internal time variables to fake the playhead
-        playbackStartCtxTime = audioCtx.currentTime; 
-        playbackStartOffset = frameTime;
-        playing = true; // force simulate live behavior
-        
-        // Multi-sample Motion Blur Loop
-        // We step 't' very slightly to generate blur
-        for(let s=0; s<motionBlurSamples; s++) {
-            const subTimeOffset = (s / motionBlurSamples) * (1/fps);
-            playbackStartOffset = frameTime + subTimeOffset;
+    try {
+        for (let f = 0; f < totalFrames; f++) {
+            const frameTime = f / fps;
             
-            // Re-eval animate state manually without requestAnimationFrame
-            animate(); 
-        }
-        
-        // Encode the accumulated frame
-        // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
-        const bmp = await createImageBitmap(renderer.domElement);
-        const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
-        encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
-        vFrame.close();
-        bmp.close();
-        
-        // Throttle to prevent WebCodecs queue explosion which causes silent crashes
-        while (encoder.encodeQueueSize > 5) {
-            await new Promise(r => setTimeout(r, 5));
-        }
-        
-        if (f % 5 === 0) {
-            const pct = (f / totalFrames) * 100;
-            prog.style.width = pct + '%';
-            stat.innerText = `Rendering: ${f} / ${totalFrames} frames`;
+            // Setup internal time variables to fake the playhead
+            playbackStartCtxTime = audioCtx.currentTime;
+            playbackStartOffset = frameTime;
+            playing = true; // force simulate live behavior
             
-            const elapsed = (performance.now() - startRealTime) / 1000;
-            const tpf = elapsed / (f + 1);
-            const remain = (totalFrames - f) * tpf;
-            eta.innerText = `ETA: ${Math.round(remain)} seconds`;
+            // Multi-sample Motion Blur Loop
+            // We step 't' very slightly to generate blur
+            for(let s=0; s<motionBlurSamples; s++) {
+                const subTimeOffset = (s / motionBlurSamples) * (1/fps);
+                playbackStartOffset = frameTime + subTimeOffset;
+
+                // Re-eval animate state manually without requestAnimationFrame
+                animate();
+            }
+
+            // Encode the accumulated frame
+            // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
+            const bmp = await createImageBitmap(renderer.domElement);
+            const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
+            encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
+            vFrame.close();
+            bmp.close();
             
-            // Yield to browser to update UI
-            await new Promise(r => setTimeout(r, 0));
+            // Throttle to prevent WebCodecs queue explosion which causes silent crashes
+            while (encoder.encodeQueueSize > 5) {
+                await new Promise(r => setTimeout(r, 5));
+            }
+
+            if (f % 5 === 0) {
+                const pct = (f / totalFrames) * 100;
+                prog.style.width = pct + '%';
+                stat.innerText = `Rendering: ${f} / ${totalFrames} frames`;
+
+                const elapsed = (performance.now() - startRealTime) / 1000;
+                const tpf = elapsed / (f + 1);
+                const remain = (totalFrames - f) * tpf;
+                eta.innerText = `ETA: ${Math.round(remain)} seconds`;
+
+                // Yield to browser to update UI
+                await new Promise(r => setTimeout(r, 0));
+            }
         }
+
+        stat.innerText = `Finalizing video file...`;
+        await encoder.flush();
+        encoder.close();
+    } catch (e) {
+        console.error("4K render loop failed:", e);
+        alert("Render fehlgeschlagen. WebCodecs oder Canvas-Export wird nicht vollständig unterstützt.");
     }
-    
-    stat.innerText = `Finalizing video file...`;
-    await encoder.flush();
-    encoder.close();
     
     // Reconstruct fake webm/mkv format or return raw chunks
     // *Warning: vp8 raw chunks need to be muxed. 
