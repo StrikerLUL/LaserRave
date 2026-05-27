@@ -86,6 +86,7 @@ const CFG = {
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
+    ocean:    [0x001133, 0x0055ff, 0x00aaff, 0x00ffff, 0x00ffcc, 0x1177aa],
     ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
     aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
     neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
@@ -1081,7 +1082,11 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (CFG.theme === 'synthwave' && playing && !isSilent) {
+  if (CFG.theme === 'ocean' && playing && !isSilent) {
+    // Force the liquid pattern when the ocean theme is active and music is playing
+    wanted = 'liquid';
+
+  } else if (CFG.theme === 'synthwave' && playing && !isSilent) {
     // Force the vortex pattern when the synthwave theme is active and music is playing
     wanted = 'vortex';
 
@@ -1510,6 +1515,7 @@ async function loadAudio(file) {
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
         audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+        songMap = { bpm: 120, beats: [], sections: [{ start: 0, end: 10, startTime: 0, intensity: 1, type: "drop" }] };
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -2586,6 +2592,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(vortexSpeed + phaseOff) * radius * (1 + mid * 0.5);
                     break;
                 }
+                // ─── LIQUID: Fluid, overlapping sine waves for Ocean theme ───
+                case 'liquid': {
+                    const liquidSpeed = tAnim * 0.8;
+                    const wave1 = Math.sin(liquidSpeed + wn * Math.PI * 2.0);
+                    const wave2 = Math.cos(liquidSpeed * 1.3 + phaseOff * 0.5);
+                    localPan = (wave1 * 0.6 + wave2 * 0.4) * sp;
+                    localTilt = tiltRad + (Math.sin(liquidSpeed * 0.7 + phaseOff) * 0.3) * sp + (mid * 0.1);
                 // ─── DNA: Double Helix for neoncity theme ────────────────────
                 case 'dna': {
                     const strand = i % 2 === 0 ? 1 : -1;
@@ -2695,6 +2708,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 patternOpMod = (Math.sin(tAnim * 12.0 + i * 5.0) > 0.5) ? 1.0 : 0.2;
             } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
                 patternOpMod = 0.0;
+            } else if (pat === 'liquid') {
+                // Smooth undulating opacity
+                patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
             }
         }
 
