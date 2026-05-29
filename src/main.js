@@ -87,8 +87,8 @@ const CFG = {
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
     ocean:    [0x001133, 0x0055ff, 0x00aaff, 0x00ffff, 0x00ffcc, 0x1177aa],
-    ocean:    [0x00ffff, 0x00aaff, 0x0044ff, 0x00ffcc, 0x2288ff, 0x00ffff],
     aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
+    toxic:    [0x33ff00, 0xccff00, 0x8800ff, 0x00ff33, 0xffff00, 0x5500aa],
     neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
     cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
     quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
@@ -1097,6 +1097,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'aurora' && playing && !isSilent) {
     wanted = 'aurora-flow';
+
+  } else if (CFG.theme === 'toxic' && playing && !isSilent) {
+    wanted = 'toxic-spill';
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
@@ -2606,6 +2609,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const wave2 = Math.cos(liquidSpeed * 1.3 + phaseOff * 0.5);
                     localPan = (wave1 * 0.6 + wave2 * 0.4) * sp;
                     localTilt = tiltRad + (Math.sin(liquidSpeed * 0.7 + phaseOff) * 0.3) * sp + (mid * 0.1);
+                    break;
+                }
                 // ─── DNA: Double Helix for neoncity theme ────────────────────
                 case 'dna': {
                     const strand = i % 2 === 0 ? 1 : -1;
@@ -2626,6 +2631,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                         localPan += (Math.random() - 0.5) * 0.1;
                         localTilt += (Math.random() - 0.5) * 0.1;
                     }
+                    break;
+                }
                 // ─── QUASAR-SPIN: Fast expanding/contracting spin for quasar theme ──
                 case 'quasar-spin': {
                     const spinSpeed = tAnim * 3.5;
@@ -2650,6 +2657,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     // Creates a smooth, sweeping vertical/horizontal ribbon effect
                     localPan = norm2 * sp + Math.sin(flowSpeed + lxf * 2.0) * 0.6 * sp;
                     localTilt = tiltRad + (Math.sin(flowSpeed * 1.2 + lyf * Math.PI) * 0.4 + Math.cos(flowSpeed * 0.8 + lzf * 2.0) * 0.3) * sp * (1 + energy * 0.2);
+                    break;
+                }
+                // ─── TOXIC-SPILL: Oozing, irregular bubbling movement ────────
+                case 'toxic-spill': {
+                    const spillSpeed = tAnim * 0.6;
+                    // Chaotic oozing effect combining multiple frequencies
+                    const bubble = Math.sin(spillSpeed * 2.5 + phaseOff * 3.0) * 0.2 * bass;
+                    localPan = norm2 * 0.7 * sp + Math.sin(spillSpeed + phaseOff) * 0.4 * sp + bubble;
+                    localTilt = tiltRad + Math.cos(spillSpeed * 0.7 + wn * Math.PI) * 0.3 * sp + bubble;
                     break;
                 }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
