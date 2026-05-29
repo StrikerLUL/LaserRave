@@ -92,6 +92,7 @@ const CFG = {
     neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
     cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
     quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
+    toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
   }
 };
 
@@ -1108,6 +1109,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'supernova';
   } else if (CFG.theme === 'quasar' && playing && !isSilent) {
     wanted = 'quasar-spin';
+  } else if (CFG.theme === 'toxic' && playing && !isSilent) {
+    wanted = 'radioactive';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -2640,6 +2643,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const angle = spinSpeed + (i / CFG.laserCount) * Math.PI * 8.0;
                     localPan = Math.cos(angle) * expandRadius + (kick * (Math.random() - 0.5) * 0.5);
                     localTilt = tiltRad + Math.sin(angle) * expandRadius + (kick * (Math.random() - 0.5) * 0.5);
+                    break;
+                }
+                // ─── RADIOACTIVE: Jittery, oozing motion for toxic theme ─────────
+                case 'radioactive': {
+                    const oozeSpeed = tAnim * 1.5;
+                    const jitterX = energy > 0.6 ? (Math.random() - 0.5) * 0.1 * sp : 0;
+                    const jitterY = energy > 0.6 ? (Math.random() - 0.5) * 0.1 * sp : 0;
+                    localPan = norm2 * 0.7 * sp + Math.sin(oozeSpeed + phaseOff * 2.0) * 0.3 * sp + jitterX;
+                    localTilt = tiltRad + Math.cos(oozeSpeed * 0.8 + norm2 * Math.PI) * 0.3 * sp + jitterY + bass * 0.2;
                     break;
                 }
                 // ─── OCEAN-WAVE: Gentle rolling wave for ocean theme ─────────
