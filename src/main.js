@@ -160,6 +160,7 @@ const CFG = {
     cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
     quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
     toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
+    inferno:  [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffaa00, 0xff2200],
   }
 };
 
@@ -1042,7 +1043,7 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15
+    'starburst': 15, 'flame': 16
 };
 
 const laserUniforms = {
@@ -1267,6 +1268,10 @@ const laserVertexShader = `
       else if (uPattern == 15) { // starburst
           localPan = sin(uTime * lxf * 3.0 + lxp) * 1.5 * sp * ((uIsPeakDrop > 0.5) ? 2.0 : 1.0);
           localTilt = uTilt + cos(uTime * lyf * 3.0 + lyp) * 0.8 * sp;
+      }
+      else if (uPattern == 16) { // flame
+          localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
+          localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
       }
       else {
           localTilt = uTilt;
@@ -1522,6 +1527,10 @@ const laserSpotsVertexShader = `
       else if (uPattern == 15) {
           localPan = sin(uTime * lxf * 3.0 + lxp) * 1.5 * sp * ((uIsPeakDrop > 0.5) ? 2.0 : 1.0);
           localTilt = uTilt + cos(uTime * lyf * 3.0 + lyp) * 0.8 * sp;
+      }
+      else if (uPattern == 16) {
+          localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
+          localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
       }
       else {
           localTilt = uTilt;
@@ -3516,6 +3525,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'quasar-spin';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
+
+  } else if (CFG.theme === 'inferno' && playing && !isSilent) {
+    wanted = 'flame';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -5538,6 +5550,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 case 'starburst': {
                     localPan = Math.sin(tAnim * lxf * 3.0 + lxp) * 1.5 * sp * (isPeakDrop ? 2.0 : 1.0);
                     localTilt = tiltRad + Math.cos(tAnim * lyf * 3.0 + lyp) * 0.8 * sp;
+                    break;
+                }
+                // ─── FLAME: Fire-like movement for Inferno theme ─────────────
+                case 'flame': {
+                    const flameSpeed = tAnim * 2.0;
+                    localPan = norm2 * 0.5 * sp + Math.sin(flameSpeed + wn * 10.0) * 0.1 * sp;
+                    localTilt = tiltRad + (Math.sin(flameSpeed * 2.5 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
                     break;
                 }
                 default: {
