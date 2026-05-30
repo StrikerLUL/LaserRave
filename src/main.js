@@ -217,14 +217,20 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
+    renderer = new WebGPURenderer({
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    isWebGPU = true;
+    console.log('WebGPURenderer initialized successfully');
+  } catch (e) {
+    console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
     renderer = new THREE.WebGLRenderer({
       antialias: true,
       powerPreference: "high-performance"
     });
     isWebGPU = false;
-    console.log('WebGLRenderer initialized successfully');
-  } catch (e) {
-    console.error("Renderer init failed", e);
+    console.log('WebGLRenderer fallback initialized successfully');
   }
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -3974,7 +3980,12 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    try {
+      audioBuffer = await audioCtx.decodeAudioData(ab);
+    } catch(err) {
+      console.warn("Failed to decode audio, treating as unplayable", err);
+      throw err;
+    }
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4139,7 +4150,9 @@ async function togglePlay() {
       };
     }
   }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(e => console.warn('audioCtx.resume failed', e));
+  }
   if (playing) {
     playbackStartOffset = getPlaybackTime(); // save position
     if (source) source.stop();
@@ -4151,7 +4164,11 @@ async function togglePlay() {
       try {
         source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
-        source.connect(analyser);
+        try {
+          if (analyser) source.connect(analyser);
+        } catch(err) {
+          console.warn("Failed to connect source", err);
+        }
 
         try { analyser.disconnect(); } catch(e){}
         if (mediaStreamDest) analyser.connect(mediaStreamDest);
