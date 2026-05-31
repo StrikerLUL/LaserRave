@@ -160,6 +160,7 @@ const CFG = {
     cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
     quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
     toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
+    thunderstorm: [0x0022ff, 0xffffff, 0x4466ff, 0x88aaff, 0x0000ff, 0xddddff],
   }
 };
 
@@ -1042,7 +1043,7 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15
+    'starburst': 15, 'lightning': 16
 };
 
 const laserUniforms = {
@@ -1268,6 +1269,12 @@ const laserVertexShader = `
           localPan = sin(uTime * lxf * 3.0 + lxp) * 1.5 * sp * ((uIsPeakDrop > 0.5) ? 2.0 : 1.0);
           localTilt = uTilt + cos(uTime * lyf * 3.0 + lyp) * 0.8 * sp;
       }
+      else if (uPattern == 16) { // lightning
+          float lightningSpeed = 15.0;
+          float flash = step(0.95, fract(uTime * 3.0 + wn * 7.0));
+          localPan = (fract(sin(dot(vec2(uTime * lightningSpeed, aInstanceID), vec2(12.9898,78.233))) * 43758.5453) - 0.5) * 2.0 * sp * flash;
+          localTilt = uTilt + (fract(cos(dot(vec2(uTime * lightningSpeed, aInstanceID), vec2(12.9898,78.233))) * 43758.5453) - 0.5) * sp * flash;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1297,6 +1304,8 @@ const laserVertexShader = `
               patternOpMod = 0.5 + sin(uTime * 2.0 + iPhase * 3.14159265) * 0.5;
           } else if (uPattern == 15) {
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
+          } else if (uPattern == 16) {
+              patternOpMod = step(0.95, fract(uTime * 3.0 + wn * 7.0));
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -1523,6 +1532,12 @@ const laserSpotsVertexShader = `
           localPan = sin(uTime * lxf * 3.0 + lxp) * 1.5 * sp * ((uIsPeakDrop > 0.5) ? 2.0 : 1.0);
           localTilt = uTilt + cos(uTime * lyf * 3.0 + lyp) * 0.8 * sp;
       }
+      else if (uPattern == 16) {
+          float lightningSpeed = 15.0;
+          float flash = step(0.95, fract(uTime * 3.0 + wn * 7.0));
+          localPan = (fract(sin(dot(vec2(uTime * lightningSpeed, aInstanceID), vec2(12.9898,78.233))) * 43758.5453) - 0.5) * 2.0 * sp * flash;
+          localTilt = uTilt + (fract(cos(dot(vec2(uTime * lightningSpeed, aInstanceID), vec2(12.9898,78.233))) * 43758.5453) - 0.5) * sp * flash;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1550,6 +1565,8 @@ const laserSpotsVertexShader = `
               patternOpMod = 0.5 + sin(uTime * 2.0 + iPhase * 3.14159265) * 0.5;
           } else if (uPattern == 15) {
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
+          } else if (uPattern == 16) {
+              patternOpMod = step(0.95, fract(uTime * 3.0 + wn * 7.0));
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -3516,6 +3533,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'quasar-spin';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
+
+  } else if (CFG.theme === 'thunderstorm' && playing && !isSilent) {
+    wanted = 'lightning';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -5507,6 +5527,19 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(spillSpeed * 0.7 + wn * Math.PI) * 0.3 * sp + bubble;
                     break;
                 }
+                // ─── LIGHTNING: Fast random jagged flashes for thunderstorm ──
+                case 'lightning': {
+                    const lightningSpeed = 15.0;
+                    const flashVal = (tAnim * 3.0 + wn * 7.0) % 1.0;
+                    const flash = flashVal > 0.95 ? 1.0 : 0.0;
+
+                    const randX = (Math.sin(tAnim * lightningSpeed * 12.9898 + i * 78.233) * 43758.5453) % 1.0;
+                    const randY = (Math.cos(tAnim * lightningSpeed * 12.9898 + i * 78.233) * 43758.5453) % 1.0;
+
+                    localPan = (Math.abs(randX) - 0.5) * 2.0 * sp * flash;
+                    localTilt = tiltRad + (Math.abs(randY) - 0.5) * sp * flash;
+                    break;
+                }
                 // ─── SINE: Smooth mathematical sine wave ───────────────────
                 case 'sine': {
                     const waveT = tAnim * lxf * 1.2 + wn * Math.PI * 4.0;
@@ -5617,6 +5650,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'liquid') {
                 // Smooth undulating opacity
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
+            } else if (pat === 'lightning') {
+                const flashVal = (tAnim * 3.0 + wn * 7.0) % 1.0;
+                patternOpMod = flashVal > 0.95 ? 1.0 : 0.0;
             }
         }
 
