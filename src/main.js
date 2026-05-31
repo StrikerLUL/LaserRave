@@ -217,14 +217,25 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
-    renderer = new THREE.WebGLRenderer({
+    renderer = new WebGPURenderer({
       antialias: true,
       powerPreference: "high-performance"
     });
-    isWebGPU = false;
-    console.log('WebGLRenderer initialized successfully');
+    isWebGPU = true;
+    console.log('WebGPURenderer initialized successfully');
   } catch (e) {
-    console.error("Renderer init failed", e);
+    console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: "high-performance"
+      });
+      isWebGPU = false;
+      console.log('WebGLRenderer initialized successfully');
+    } catch (webglErr) {
+      console.error("WebGLRenderer init failed", webglErr);
+      throw webglErr;
+    }
   }
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -4139,7 +4150,9 @@ async function togglePlay() {
       };
     }
   }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(e => console.warn("Failed to resume audioCtx:", e));
+  }
   if (playing) {
     playbackStartOffset = getPlaybackTime(); // save position
     if (source) source.stop();
@@ -6536,9 +6549,11 @@ async function initRenderer() {
                 antialias: true,
                 powerPreference: "high-performance"
             });
+            isWebGPU = false;
             renderer.setSize(W, H);
             renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-            renderer.toneMapping = THREE.NoToneMapping;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             // PostProcessing might need to be re-initialized for WebGL if it was WebGPU

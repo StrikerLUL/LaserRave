@@ -1,25 +1,29 @@
 const { chromium } = require('playwright');
 
 (async () => {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+        recordVideo: { dir: './playwright-videos' },
+        viewport: { width: 1280, height: 720 }
+    });
+    const page = await context.newPage();
 
-  try {
-    await page.goto('http://localhost:5173/');
+    page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text()));
 
-    // Select the 'toxic' theme
-    await page.selectOption('#param-theme', 'toxic');
+    console.log("Navigating to app...");
+    await page.goto('http://localhost:5173');
 
-    // Wait for a short while to ensure rendering happens
-    await page.waitForTimeout(2000);
+    // Wait until initial app setup completes and DOM is stable
+    await page.waitForTimeout(3000);
 
-    // Take a screenshot to verify
-    await page.screenshot({ path: 'toxic_theme_screenshot.png' });
+    console.log("Taking screenshot...");
+    await page.screenshot({ path: 'frontend-verification.png' });
 
-    console.log('Successfully selected toxic theme and saved screenshot.');
-  } catch (error) {
-    console.error('Error during Playwright test:', error);
-  } finally {
+    // Check if console output showed fallback correctly or WebGPURenderer initialization
+    console.log("Waiting for video recording to settle...");
+    await page.waitForTimeout(1000);
+
+    await context.close();
     await browser.close();
-  }
+    console.log("Done.");
 })();
