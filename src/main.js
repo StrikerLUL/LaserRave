@@ -161,6 +161,7 @@ const CFG = {
     quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
     toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
     inferno:  [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffaa00, 0xff2200],
+    supernova:[0xffaa00, 0xff0055, 0xaa00ff, 0x00aaff, 0x00ffaa, 0xffff00],
   }
 };
 
@@ -1054,7 +1055,7 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15, 'flame': 16
+    'starburst': 15, 'flame': 16, 'supernova': 17
 };
 
 const laserUniforms = {
@@ -1283,6 +1284,13 @@ const laserVertexShader = `
       else if (uPattern == 16) { // flame
           localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
           localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+      }
+      else if (uPattern == 17) { // supernova
+          float novaSpeed = uTime * 2.5;
+          float expandRadius = 0.3 + sin(novaSpeed * 0.5) * 0.7;
+          float angle = novaSpeed + wn * 3.14159265 * 8.0;
+          localPan = cos(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+          localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
       }
       else {
           localTilt = uTilt;
@@ -1542,6 +1550,13 @@ const laserSpotsVertexShader = `
       else if (uPattern == 16) {
           localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
           localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+      }
+      else if (uPattern == 17) {
+          float novaSpeed = uTime * 2.5;
+          float expandRadius = 0.3 + sin(novaSpeed * 0.5) * 0.7;
+          float angle = novaSpeed + wn * 3.14159265 * 8.0;
+          localPan = cos(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+          localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
       }
       else {
           localTilt = uTilt;
@@ -3531,6 +3546,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'dna';
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
+    wanted = 'scatter';
+  } else if (CFG.theme === 'supernova' && playing && !isSilent) {
     wanted = 'supernova';
   } else if (CFG.theme === 'quasar' && playing && !isSilent) {
     wanted = 'quasar-spin';
