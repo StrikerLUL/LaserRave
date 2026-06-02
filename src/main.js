@@ -161,6 +161,7 @@ const CFG = {
     quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
     toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
     inferno:  [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffaa00, 0xff2200],
+    plasma:   [0xff00ff, 0x00ffff, 0x8a2be2, 0xff1493, 0x00ffcc, 0xff0055],
   }
 };
 
@@ -1054,7 +1055,7 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15, 'flame': 16
+    'starburst': 15, 'flame': 16, 'plasma-pulse': 17
 };
 
 const laserUniforms = {
@@ -1283,6 +1284,13 @@ const laserVertexShader = `
       else if (uPattern == 16) { // flame
           localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
           localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+      }
+      else if (uPattern == 17) { // plasma-pulse
+          float plasmaT = uTime * 1.8;
+          float waveX = sin(plasmaT + phaseOff * 1.5) * 0.6 * sp;
+          float waveY = cos(plasmaT * 1.3 + wn * PI) * 0.4 * sp;
+          localPan = norm2 * 0.6 * sp + waveX + (uBass * 0.2 * sp);
+          localTilt = uTilt + waveY + (uEnergy * 0.3 * sp);
       }
       else {
           localTilt = uTilt;
@@ -1542,6 +1550,13 @@ const laserSpotsVertexShader = `
       else if (uPattern == 16) {
           localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
           localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+      }
+      else if (uPattern == 17) {
+          float plasmaT = uTime * 1.8;
+          float waveX = sin(plasmaT + phaseOff * 1.5) * 0.6 * sp;
+          float waveY = cos(plasmaT * 1.3 + wn * PI) * 0.4 * sp;
+          localPan = norm2 * 0.6 * sp + waveX + (uBass * 0.2 * sp);
+          localTilt = uTilt + waveY + (uEnergy * 0.3 * sp);
       }
       else {
           localTilt = uTilt;
@@ -3526,6 +3541,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'toxic-spill';
+
+  } else if (CFG.theme === 'plasma' && playing && !isSilent) {
+    wanted = 'plasma-pulse';
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
@@ -5570,6 +5588,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const flameSpeed = tAnim * 2.0;
                     localPan = norm2 * 0.5 * sp + Math.sin(flameSpeed + wn * 10.0) * 0.1 * sp;
                     localTilt = tiltRad + (Math.sin(flameSpeed * 2.5 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+                    break;
+                }
+                // ─── PLASMA-PULSE: Organic, pulsating wave motion for Plasma theme ───
+                case 'plasma-pulse': {
+                    const plasmaT = tAnim * 1.8;
+                    const waveX = Math.sin(plasmaT + phaseOff * 1.5) * 0.6 * sp;
+                    const waveY = Math.cos(plasmaT * 1.3 + wn * Math.PI) * 0.4 * sp;
+                    localPan = norm2 * 0.6 * sp + waveX + (bass * 0.2 * sp);
+                    localTilt = tiltRad + waveY + (energy * 0.3 * sp);
                     break;
                 }
                 default: {
