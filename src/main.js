@@ -277,6 +277,7 @@ try {
     setPixelRatio: () => {},
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
+    clear: () => {},
     domElement: document.createElement('canvas')
   };
   isWebGPU = false;
@@ -448,11 +449,15 @@ const rgbShiftPass = { enabled: false, uniforms: { amount: { get value() { retur
 // Rebuilds the TSL output chain to include only the active effects
 function rebuildPostChain() {
     if (!postProcessing || !sceneColor || !bloomNode) return;
-    let chain = sceneColor.add(bloomNode);
-    if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
-    if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
-    postProcessing.outputNode = chain.toneMapping(THREE.NeutralToneMapping);
-    postProcessing.needsUpdate = true;
+    try {
+        let chain = sceneColor.add(bloomNode);
+        if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
+        if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
+        postProcessing.outputNode = chain.toneMapping(THREE.NeutralToneMapping);
+        postProcessing.needsUpdate = true;
+    } catch (e) {
+        console.warn("Failed to rebuild post processing chain", e);
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -4098,7 +4103,7 @@ async function loadAudio(file) {
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
-        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -4156,7 +4161,7 @@ async function togglePlay() {
 
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
       songMap = {
           bassMap: new Float32Array(100),
           midMap: new Float32Array(100),
@@ -4177,6 +4182,7 @@ async function togglePlay() {
           }],
           hopSec: 0.1, hop: 4410, N: 100, bpm: 120
       };
+      waveformValid = false;
     }
   }
   if (audioCtx && audioCtx.state === 'suspended') {
@@ -4255,7 +4261,10 @@ function toggleRecording() {
       try { analyser.disconnect(); } catch(e){}
       analyser.connect(mediaStreamDest);
 
-      const canvasStream = renderer.domElement.captureStream(60);
+      const canvasStream = typeof renderer.domElement.captureStream === 'function'
+          ? renderer.domElement.captureStream(60)
+          : null;
+      if (!canvasStream) throw new Error("captureStream not supported");
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
         ...mediaStreamDest.stream.getAudioTracks()
@@ -6623,9 +6632,11 @@ async function initRenderer() {
                 setPixelRatio: () => {},
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
+                clear: () => {},
                 domElement: document.createElement('canvas')
             };
             postProcessing = null;
+            isWebGPU = false;
 
             if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
         }
