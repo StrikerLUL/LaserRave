@@ -3191,7 +3191,51 @@ function initAudioContext() {
     dataArray = new Uint8Array(analyser.frequencyBinCount);
     return true;
   } catch (e) {
-    console.warn("Failed to initialize AudioContext:", e);
+    console.warn("Failed to initialize AudioContext, falling back to mock objects:", e);
+
+    audioCtx = {
+        sampleRate: 44100,
+        currentTime: performance.now() / 1000,
+        destination: {},
+        createAnalyser: () => ({
+            fftSize: 2048,
+            frequencyBinCount: 1024,
+            connect: () => {},
+            disconnect: () => {},
+            getByteFrequencyData: (arr) => { if(arr) arr.fill(0); }
+        }),
+        createBuffer: (channels, length, sampleRate) => ({
+            duration: length / sampleRate,
+            length: length,
+            sampleRate: sampleRate,
+            numberOfChannels: channels,
+            getChannelData: () => new Float32Array(length)
+        }),
+        createBufferSource: () => ({
+            buffer: null,
+            connect: () => {},
+            disconnect: () => {},
+            start: () => {},
+            stop: () => {},
+            loop: false,
+            onended: null
+        }),
+        createBiquadFilter: () => ({
+            type: 'lowpass',
+            frequency: { value: 1000 },
+            Q: { value: 1 },
+            connect: () => {}
+        }),
+        createGain: () => ({
+            gain: { value: 1 },
+            connect: () => {}
+        }),
+        resume: async () => {},
+        state: 'running',
+        createMediaStreamDestination: () => ({ stream: new MediaStream() })
+    };
+    analyser = audioCtx.createAnalyser();
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
     return false;
   }
 }
@@ -3662,7 +3706,7 @@ async function renderBand(buf, loHz, hiHz) {
     const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OfflineCtxConstructor) {
       console.warn("OfflineAudioContext not supported, using fallback band array.");
-      return new Float32Array(buf.length);
+      return new Float32Array(buf.length || 441000);
     }
 
     const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
@@ -3686,7 +3730,7 @@ async function renderBand(buf, loHz, hiHz) {
 
   } catch (error) {
     console.error("Error in renderBand:", error);
-    return new Float32Array(buf.length);
+    return new Float32Array(buf ? buf.length || 441000 : 441000);
   }
 }
 
@@ -3947,8 +3991,10 @@ async function analyzeSong(audioBuf, fileName) {
   return { bassMap, midMap, highMap, melodyMap, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
   } catch (err) {
     console.error("Analysis failed, returning fallback map:", err);
-    document.getElementById('btn-play-pause').disabled = false;
-    document.getElementById('btn-render').disabled = false;
+    const btnPP = document.getElementById('btn-play-pause');
+    if (btnPP) btnPP.disabled = false;
+    const btnR = document.getElementById('btn-render');
+    if (btnR) btnR.disabled = false;
     return {
       bassMap: new Float32Array(100),
       midMap: new Float32Array(100),
