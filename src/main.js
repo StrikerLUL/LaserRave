@@ -279,7 +279,9 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: Object.assign(document.createElement('canvas'), {
+        captureStream: () => new MediaStream()
+    })
   };
   isWebGPU = false;
 }
@@ -3228,6 +3230,13 @@ function initAudioContext() {
             numberOfChannels: channels,
             getChannelData: () => new Float32Array(length)
         }),
+        decodeAudioData: async (ab) => ({
+            duration: 10,
+            length: 441000,
+            sampleRate: 44100,
+            numberOfChannels: 1,
+            getChannelData: () => new Float32Array(441000)
+        }),
         createBufferSource: () => ({
             buffer: null,
             connect: () => {},
@@ -4159,7 +4168,7 @@ async function loadAudio(file) {
                 bpm: 120,
                 beats: [{ time: 0, strength: 1 }],
                 sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-                bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
+                bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100), melodyMap: new Float32Array(100), buildUpMap: new Float32Array(100),
                 hopSec: 0.1, N: 100
             };
             waveformValid = false;
@@ -6698,7 +6707,9 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+                domElement: Object.assign(document.createElement('canvas'), {
+                    captureStream: () => new MediaStream()
+                })
             };
             postProcessing = null;
             isWebGPU = false;
