@@ -162,6 +162,7 @@ const CFG = {
     toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
     inferno:  [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffaa00, 0xff2200],
     supernova:[0xffaa00, 0xff0055, 0xaa00ff, 0x00aaff, 0x00ffaa, 0xffff00],
+    phantom:  [0x00ffff, 0x9900ff, 0x00ffcc, 0x6600ff, 0x00cccc, 0xcc00ff],
   }
 };
 
@@ -1060,7 +1061,7 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15, 'flame': 16, 'supernova': 17
+    'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18
 };
 
 const laserUniforms = {
@@ -1296,6 +1297,14 @@ const laserVertexShader = `
           float angle = novaSpeed + wn * 3.14159265 * 8.0;
           localPan = cos(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
           localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+      }
+      else if (uPattern == 18) { // phantom
+          float phantomSpeed = uTime * 0.8;
+          localPan  = sin(phantomSpeed + phaseOff * 3.0) * 0.8 * sp
+                     + cos(uTime * 0.5 + aInstanceID) * 0.2 * sp * norm2;
+          localTilt = uTilt + 0.1 * sp
+                     + sin(uTime * 1.2 + aInstanceID * 2.0) * 0.15 * sp * iPhase
+                     + uBass * 0.3;
       }
       else {
           localTilt = uTilt;
@@ -1562,6 +1571,14 @@ const laserSpotsVertexShader = `
           float angle = novaSpeed + wn * 3.14159265 * 8.0;
           localPan = cos(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
           localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+      }
+      else if (uPattern == 18) { // phantom
+          float phantomSpeed = uTime * 0.8;
+          localPan  = sin(phantomSpeed + phaseOff * 3.0) * 0.8 * sp
+                     + cos(uTime * 0.5 + aInstanceID) * 0.2 * sp * norm2;
+          localTilt = uTilt + 0.1 * sp
+                     + sin(uTime * 1.2 + aInstanceID * 2.0) * 0.15 * sp * iPhase
+                     + uBass * 0.3;
       }
       else {
           localTilt = uTilt;
@@ -3554,6 +3571,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'scatter';
   } else if (CFG.theme === 'supernova' && playing && !isSilent) {
     wanted = 'supernova';
+  } else if (CFG.theme === 'phantom' && playing && !isSilent) {
+    wanted = 'phantom';
   } else if (CFG.theme === 'quasar' && playing && !isSilent) {
     wanted = 'quasar-spin';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
