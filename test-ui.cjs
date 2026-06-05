@@ -16,6 +16,12 @@ const { chromium } = require('playwright');
     // Wait until initial app setup completes and DOM is stable
     await page.waitForTimeout(3000);
 
+    console.log("Changing theme to eclipse...");
+    await page.selectOption('#param-theme', 'eclipse');
+
+    // Wait to capture video with the new theme
+    await page.waitForTimeout(3000);
+
     console.log("Taking screenshot...");
     await page.screenshot({ path: 'frontend-verification.png' });
 
