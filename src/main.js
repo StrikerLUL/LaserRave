@@ -280,7 +280,7 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: Object.assign(document.createElement('canvas'), { captureStream: () => new MediaStream() })
   };
   isWebGPU = false;
 }
@@ -3262,7 +3262,14 @@ function initAudioContext() {
         }),
         resume: async () => {},
         state: 'running',
-        createMediaStreamDestination: () => ({ stream: new MediaStream() })
+        createMediaStreamDestination: () => ({ stream: new MediaStream() }),
+        decodeAudioData: async () => ({
+            duration: 10,
+            length: 441000,
+            sampleRate: 44100,
+            numberOfChannels: 1,
+            getChannelData: () => new Float32Array(441000)
+        })
     };
     analyser = audioCtx.createAnalyser();
     dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -6720,7 +6727,7 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+                domElement: Object.assign(document.createElement('canvas'), { captureStream: () => new MediaStream() })
             };
             postProcessing = null;
             isWebGPU = false;
