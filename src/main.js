@@ -163,6 +163,7 @@ const CFG = {
     inferno:  [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffaa00, 0xff2200],
     supernova:[0xffaa00, 0xff0055, 0xaa00ff, 0x00aaff, 0x00ffaa, 0xffff00],
     phantom:  [0x00ffff, 0x9900ff, 0x00ffcc, 0x6600ff, 0x00cccc, 0xcc00ff],
+    eclipse:  [0xffffff, 0xff0000, 0x222222, 0xffffff, 0x660000, 0xff3333],
   }
 };
 
@@ -1061,7 +1062,7 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18
+    'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19
 };
 
 const laserUniforms = {
@@ -1305,6 +1306,12 @@ const laserVertexShader = `
           localTilt = uTilt + 0.1 * sp
                      + sin(uTime * 1.2 + aInstanceID * 2.0) * 0.15 * sp * iPhase
                      + uBass * 0.3;
+      }
+      else if (uPattern == 19) { // eclipse
+          float eclipseSpeed = uTime * 1.5;
+          float eclipseRadius = 0.4 * sp;
+          localPan = sin(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
+          localTilt = uTilt + cos(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius;
       }
       else {
           localTilt = uTilt;
@@ -1579,6 +1586,12 @@ const laserSpotsVertexShader = `
           localTilt = uTilt + 0.1 * sp
                      + sin(uTime * 1.2 + aInstanceID * 2.0) * 0.15 * sp * iPhase
                      + uBass * 0.3;
+      }
+      else if (uPattern == 19) { // eclipse
+          float eclipseSpeed = uTime * 1.5;
+          float eclipseRadius = 0.4 * sp;
+          localPan = sin(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
+          localTilt = uTilt + cos(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius;
       }
       else {
           localTilt = uTilt;
@@ -3613,6 +3626,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
+  } else if (CFG.theme === 'eclipse' && playing && !isSilent) {
+    wanted = 'eclipse';
   } else if (CFG.theme === 'supernova' && playing && !isSilent) {
     wanted = 'supernova';
   } else if (CFG.theme === 'phantom' && playing && !isSilent) {
@@ -5661,6 +5676,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const flameSpeed = tAnim * 2.0;
                     localPan = norm2 * 0.5 * sp + Math.sin(flameSpeed + wn * 10.0) * 0.1 * sp;
                     localTilt = tiltRad + (Math.sin(flameSpeed * 2.5 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+                    break;
+                }
+                case 'eclipse': {
+                    const eclipseSpeed = tAnim * 1.5;
+                    const eclipseRadius = 0.4 * sp;
+                    localPan = Math.sin(eclipseSpeed + i * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
+                    localTilt = tiltRad + Math.cos(eclipseSpeed + i * 0.5) * eclipseRadius;
                     break;
                 }
                 default: {
