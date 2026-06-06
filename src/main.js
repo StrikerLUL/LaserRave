@@ -164,6 +164,7 @@ const CFG = {
     supernova:[0xffaa00, 0xff0055, 0xaa00ff, 0x00aaff, 0x00ffaa, 0xffff00],
     phantom:  [0x00ffff, 0x9900ff, 0x00ffcc, 0x6600ff, 0x00cccc, 0xcc00ff],
     eclipse:  [0xffffff, 0xff0000, 0x222222, 0xffffff, 0x660000, 0xff3333],
+    glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
   }
 };
 
@@ -1062,7 +1063,8 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19
+    'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
+    'glacier': 20
 };
 
 const laserUniforms = {
@@ -1312,6 +1314,12 @@ const laserVertexShader = `
           float eclipseRadius = 0.4 * sp;
           localPan = sin(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
           localTilt = uTilt + cos(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius;
+      }
+      else if (uPattern == 20) { // glacier
+          float iceSpeed = uTime * 0.4;
+          float freezeRadius = 0.5 * sp;
+          localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
+          localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -1592,6 +1600,12 @@ const laserSpotsVertexShader = `
           float eclipseRadius = 0.4 * sp;
           localPan = sin(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
           localTilt = uTilt + cos(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius;
+      }
+      else if (uPattern == 20) { // glacier
+          float iceSpeed = uTime * 0.4;
+          float freezeRadius = 0.5 * sp;
+          localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
+          localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -3634,6 +3648,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'phantom';
   } else if (CFG.theme === 'quasar' && playing && !isSilent) {
     wanted = 'quasar-spin';
+  } else if (CFG.theme === 'glacier' && playing && !isSilent) {
+    wanted = 'glacier';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5683,6 +5699,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const eclipseRadius = 0.4 * sp;
                     localPan = Math.sin(eclipseSpeed + i * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
                     localTilt = tiltRad + Math.cos(eclipseSpeed + i * 0.5) * eclipseRadius;
+                    break;
+                }
+                case 'glacier': {
+                    const iceSpeed = tAnim * 0.4;
+                    const freezeRadius = 0.5 * sp;
+                    localPan = Math.sin(iceSpeed + i * 0.2) * freezeRadius + norm2 * 0.3 * sp;
+                    localTilt = tiltRad + Math.cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
                     break;
                 }
                 default: {
