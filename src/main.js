@@ -281,7 +281,9 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: Object.assign(document.createElement('canvas'), {
+        captureStream: () => new MediaStream()
+    })
   };
   isWebGPU = false;
 }
@@ -3276,7 +3278,14 @@ function initAudioContext() {
         }),
         resume: async () => {},
         state: 'running',
-        createMediaStreamDestination: () => ({ stream: new MediaStream() })
+        createMediaStreamDestination: () => ({ stream: new MediaStream() }),
+        decodeAudioData: async () => ({
+            duration: 10,
+            length: 441000,
+            sampleRate: 44100,
+            numberOfChannels: 1,
+            getChannelData: () => new Float32Array(441000)
+        })
     };
     analyser = audioCtx.createAnalyser();
     dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -4113,12 +4122,32 @@ async function loadAudio(file) {
     if (playing && source) { source.stop(); playing = false; }
     playbackStartOffset = 0;
 
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    let ab;
+    if (!file) {
+      // Graceful fallback: create silent 10s buffer if no file is provided
+      console.warn("No audio file provided, falling back to silent buffer.");
+      if (audioCtx && typeof audioCtx.createBuffer === 'function') {
+          audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+      } else {
+          audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      }
+    } else {
+        try {
+            ab = await file.arrayBuffer();
+            if (!audioCtx) throw new Error("AudioContext not initialized");
+            audioBuffer = await audioCtx.decodeAudioData(ab);
+        } catch (e) {
+            console.error("Failed to decode audio data, falling back to silent buffer:", e);
+            if (audioCtx && typeof audioCtx.createBuffer === 'function') {
+                audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+            } else {
+                audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+            }
+        }
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = file ? playlist.find(item => item.file === file || item.name === file.name) : null;
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -4162,7 +4191,7 @@ async function loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(audioBuffer, file.name).then(fullMap => {
+    analyzeSong(audioBuffer, file ? file.name : 'Fallback').then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }
@@ -6743,7 +6772,9 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+                domElement: Object.assign(document.createElement('canvas'), {
+                    captureStream: () => new MediaStream()
+                })
             };
             postProcessing = null;
             isWebGPU = false;
