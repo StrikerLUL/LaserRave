@@ -165,6 +165,7 @@ const CFG = {
     phantom:  [0x00ffff, 0x9900ff, 0x00ffcc, 0x6600ff, 0x00cccc, 0xcc00ff],
     eclipse:  [0xffffff, 0xff0000, 0x222222, 0xffffff, 0x660000, 0xff3333],
     glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
+    nebula:   [0x4b0082, 0x0000ff, 0x00ff00, 0x8a2be2, 0x00bfff, 0x32cd32],
   }
 };
 
@@ -1064,7 +1065,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20
+    'glacier': 20, 'nebula-swirl': 21
 };
 
 const laserUniforms = {
@@ -1320,6 +1321,12 @@ const laserVertexShader = `
           float freezeRadius = 0.5 * sp;
           localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
           localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+      }
+      else if (uPattern == 21) { // nebula-swirl
+          float swirlSpeed = uTime * 1.2;
+          float swirlRadius = 0.6 * sp;
+          localPan = sin(swirlSpeed + wn * 6.28) * swirlRadius + cos(uTime * 0.5 + aInstanceID) * 0.2 * sp * norm2;
+          localTilt = uTilt + cos(swirlSpeed * 1.1 + lyp) * swirlRadius * 0.5 + 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -1606,6 +1613,12 @@ const laserSpotsVertexShader = `
           float freezeRadius = 0.5 * sp;
           localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
           localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+      }
+      else if (uPattern == 21) { // nebula-swirl
+          float swirlSpeed = uTime * 1.2;
+          float swirlRadius = 0.6 * sp;
+          localPan = sin(swirlSpeed + wn * 6.28) * swirlRadius + cos(uTime * 0.5 + aInstanceID) * 0.2 * sp * norm2;
+          localTilt = uTilt + cos(swirlSpeed * 1.1 + lyp) * swirlRadius * 0.5 + 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -3650,6 +3663,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'quasar-spin';
   } else if (CFG.theme === 'glacier' && playing && !isSilent) {
     wanted = 'glacier';
+  } else if (CFG.theme === 'nebula' && playing && !isSilent) {
+    wanted = 'nebula-swirl';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5706,6 +5721,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const freezeRadius = 0.5 * sp;
                     localPan = Math.sin(iceSpeed + i * 0.2) * freezeRadius + norm2 * 0.3 * sp;
                     localTilt = tiltRad + Math.cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+                    break;
+                }
+                case 'nebula-swirl': {
+                    const swirlSpeed = tAnim * 1.2;
+                    const swirlRadius = 0.6 * sp;
+                    localPan = Math.sin(swirlSpeed + wn * 6.28) * swirlRadius + Math.cos(tAnim * 0.5 + i) * 0.2 * sp * norm2;
+                    localTilt = tiltRad + Math.cos(swirlSpeed * 1.1 + lyp) * swirlRadius * 0.5 + 0.1 * sp;
                     break;
                 }
                 default: {

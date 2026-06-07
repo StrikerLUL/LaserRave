@@ -16,8 +16,8 @@ const { chromium } = require('playwright');
     // Wait until initial app setup completes and DOM is stable
     await page.waitForTimeout(3000);
 
-    console.log("Changing theme to eclipse...");
-    await page.selectOption('#param-theme', 'eclipse');
+    console.log("Changing theme to nebula...");
+    await page.selectOption('#param-theme', 'nebula');
 
     // Wait to capture video with the new theme
     await page.waitForTimeout(3000);
