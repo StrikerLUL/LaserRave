@@ -3276,7 +3276,14 @@ function initAudioContext() {
         }),
         resume: async () => {},
         state: 'running',
-        createMediaStreamDestination: () => ({ stream: new MediaStream() })
+        createMediaStreamDestination: () => ({ stream: new MediaStream() }),
+        decodeAudioData: async () => ({
+            duration: 10,
+            sampleRate: 44100,
+            length: 441000,
+            numberOfChannels: 1,
+            getChannelData: () => new Float32Array(441000)
+        })
     };
     analyser = audioCtx.createAnalyser();
     dataArray = new Uint8Array(analyser.frequencyBinCount);
