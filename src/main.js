@@ -281,7 +281,11 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: (() => {
+        const canvas = document.createElement('canvas');
+        canvas.captureStream = () => new MediaStream();
+        return canvas;
+    })()
   };
   isWebGPU = false;
 }
@@ -4115,7 +4119,13 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    try {
+        audioBuffer = await audioCtx.decodeAudioData(ab);
+    } catch (decodeErr) {
+        console.warn("decodeAudioData failed, using fallback buffer", decodeErr);
+        // Create an actual AudioBuffer instance instead of a plain object
+        audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+    }
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -6743,7 +6753,12 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+    domElement: (() => {
+      const canvas = document.createElement('canvas');
+      // Mock properties expected by downstream
+      canvas.captureStream = () => new MediaStream();
+      return canvas;
+    })()
             };
             postProcessing = null;
             isWebGPU = false;
