@@ -165,6 +165,7 @@ const CFG = {
     phantom:  [0x00ffff, 0x9900ff, 0x00ffcc, 0x6600ff, 0x00cccc, 0xcc00ff],
     eclipse:  [0xffffff, 0xff0000, 0x222222, 0xffffff, 0x660000, 0xff3333],
     glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
+    hexagon:  [0x00ffcc, 0xff00ff, 0xffff00, 0x00ccff, 0xff00cc, 0xccff00],
   }
 };
 
@@ -1064,7 +1065,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20
+    'glacier': 20, 'hexagon': 21
 };
 
 const laserUniforms = {
@@ -1320,6 +1321,13 @@ const laserVertexShader = `
           float freezeRadius = 0.5 * sp;
           localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
           localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+      }
+      else if (uPattern == 21) { // hexagon
+          float hexSpeed = uTime * 1.5;
+          float radius = 0.4 * sp * (1.0 + uKick * 0.5);
+          float angle = hexSpeed + floor(wn * 6.0) * (3.14159265 / 3.0);
+          localPan = cos(angle) * radius + norm2 * 0.2 * sp;
+          localTilt = uTilt + sin(angle) * radius;
       }
       else {
           localTilt = uTilt;
@@ -1606,6 +1614,13 @@ const laserSpotsVertexShader = `
           float freezeRadius = 0.5 * sp;
           localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
           localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+      }
+      else if (uPattern == 21) { // hexagon
+          float hexSpeed = uTime * 1.5;
+          float radius = 0.4 * sp * (1.0 + uKick * 0.5);
+          float angle = hexSpeed + floor(wn * 6.0) * (3.14159265 / 3.0);
+          localPan = cos(angle) * radius + norm2 * 0.2 * sp;
+          localTilt = uTilt + sin(angle) * radius;
       }
       else {
           localTilt = uTilt;
@@ -3657,6 +3672,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'quasar-spin';
   } else if (CFG.theme === 'glacier' && playing && !isSilent) {
     wanted = 'glacier';
+  } else if (CFG.theme === 'hexagon' && playing && !isSilent) {
+    wanted = 'hexagon';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5713,6 +5730,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const freezeRadius = 0.5 * sp;
                     localPan = Math.sin(iceSpeed + i * 0.2) * freezeRadius + norm2 * 0.3 * sp;
                     localTilt = tiltRad + Math.cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+                    break;
+                }
+                case 'hexagon': {
+                    const hexSpeed = tAnim * 1.5;
+                    const radius = 0.4 * sp * (1.0 + kick * 0.5);
+                    const angle = hexSpeed + Math.floor(wn * 6.0) * (Math.PI / 3.0);
+                    localPan = Math.cos(angle) * radius + norm2 * 0.2 * sp;
+                    localTilt = tiltRad + Math.sin(angle) * radius;
                     break;
                 }
                 default: {
