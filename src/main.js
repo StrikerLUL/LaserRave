@@ -282,7 +282,9 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: Object.assign(document.createElement('canvas'), {
+        captureStream: () => new MediaStream()
+    })
   };
   isWebGPU = false;
 }
@@ -3263,13 +3265,26 @@ function initAudioContext() {
             disconnect: () => {},
             getByteFrequencyData: (arr) => { if(arr) arr.fill(0); }
         }),
-        createBuffer: (channels, length, sampleRate) => ({
-            duration: length / sampleRate,
-            length: length,
-            sampleRate: sampleRate,
-            numberOfChannels: channels,
-            getChannelData: () => new Float32Array(length)
-        }),
+        createBuffer: (channels, length, sampleRate) => {
+            try {
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    const buf = tempCtx.createBuffer(channels, length, sampleRate);
+                    tempCtx.close().catch(() => {});
+                    return buf;
+                }
+            } catch (e) {
+                // fall through
+            }
+            return {
+                duration: length / sampleRate,
+                length: length,
+                sampleRate: sampleRate,
+                numberOfChannels: channels,
+                getChannelData: () => new Float32Array(length)
+            };
+        },
         createBufferSource: () => ({
             buffer: null,
             connect: () => {},
@@ -3292,13 +3307,26 @@ function initAudioContext() {
         resume: async () => {},
         state: 'running',
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
-        decodeAudioData: async () => ({
-            duration: 10,
-            sampleRate: 44100,
-            length: 441000,
-            numberOfChannels: 1,
-            getChannelData: () => new Float32Array(441000)
-        })
+        decodeAudioData: async () => {
+            try {
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                    return buf;
+                }
+            } catch (e) {
+                // fall through
+            }
+            return {
+                duration: 10,
+                sampleRate: 44100,
+                length: 441000,
+                numberOfChannels: 1,
+                getChannelData: () => new Float32Array(441000)
+            };
+        }
     };
     analyser = audioCtx.createAnalyser();
     dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -4208,22 +4236,49 @@ async function loadAudio(file) {
     // Graceful fallback for audio buffer
     try {
         initAudioContext();
-        if (audioCtx) {
-            audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
-            songMap = {
-                bpm: 120,
-                beats: [{ time: 0, strength: 1 }],
-                sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-                bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
-                hopSec: 0.1, N: 100
-            };
-            waveformValid = false;
-        } else {
-            throw new Error("No audioCtx available for fallback");
+        if (!audioCtx) throw new Error("No audioCtx available for fallback");
+
+        let localAudioBuffer = null;
+        try {
+            localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+        } catch (e) {
+            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            if (TempAudioContext) {
+                const tempCtx = new TempAudioContext();
+                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                tempCtx.close().catch(() => {});
+            } else {
+                throw e;
+            }
         }
+
+        if (!localAudioBuffer) throw new Error("Could not create actual AudioBuffer instance");
+
+        audioBuffer = localAudioBuffer;
+        songMap = {
+            bpm: 120,
+            beats: [{ time: 0, strength: 1 }],
+            sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
+            bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
+            hopSec: 0.1, N: 100
+        };
+        waveformValid = false;
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
-        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        // Attempt one last time to create an AudioBuffer, otherwise use the plain object
+        try {
+            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            if (TempAudioContext) {
+                const tempCtx = new TempAudioContext();
+                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                tempCtx.close().catch(() => {});
+            } else {
+                throw new Error("No AudioContext");
+            }
+        } catch (e2) {
+             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
+
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -4281,7 +4336,19 @@ async function togglePlay() {
 
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      try {
+          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+          if (TempAudioContext) {
+              const tempCtx = new TempAudioContext();
+              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+              tempCtx.close().catch(() => {});
+          } else {
+              throw new Error("No AudioContext");
+          }
+      } catch (e2) {
+           audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      }
+
       songMap = {
           bassMap: new Float32Array(100),
           midMap: new Float32Array(100),
@@ -6775,7 +6842,9 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+                domElement: Object.assign(document.createElement('canvas'), {
+                    captureStream: () => new MediaStream()
+                })
             };
             postProcessing = null;
             isWebGPU = false;
