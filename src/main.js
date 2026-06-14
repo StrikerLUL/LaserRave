@@ -271,6 +271,8 @@ try {
   document.body.appendChild(fallbackDiv);
 
   // Mock renderer to prevent immediate downstream TypeError crashes
+  const mockCanvas = document.createElement('canvas');
+  mockCanvas.captureStream = () => new MediaStream();
   renderer = {
     render: () => {},
     setAnimationLoop: (cb) => {
@@ -282,7 +284,7 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: mockCanvas
   };
   isWebGPU = false;
 }
@@ -4139,7 +4141,16 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const res = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (res && typeof res.catch === 'function') {
+                res.catch(reject);
+            }
+        } catch (err) {
+            reject(err);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4223,7 +4234,12 @@ async function loadAudio(file) {
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
-        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        initAudioContext();
+        if (audioCtx && typeof audioCtx.createBuffer === 'function') {
+            audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+        } else {
+            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -4281,7 +4297,12 @@ async function togglePlay() {
 
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      initAudioContext();
+      if (audioCtx && typeof audioCtx.createBuffer === 'function') {
+          audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+      } else {
+          audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      }
       songMap = {
           bassMap: new Float32Array(100),
           midMap: new Float32Array(100),
@@ -6764,6 +6785,8 @@ async function initRenderer() {
             document.body.appendChild(fallbackDiv);
 
             // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
+            const mockCanvas2 = document.createElement('canvas');
+            mockCanvas2.captureStream = () => new MediaStream();
             renderer = {
                 render: () => {},
                 setAnimationLoop: (cb) => {
@@ -6775,7 +6798,7 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+                domElement: mockCanvas2
             };
             postProcessing = null;
             isWebGPU = false;
