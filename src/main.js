@@ -150,6 +150,7 @@ const CFG = {
     rgb:      [0xff2222, 0x22ff44, 0x2244ff, 0xffff00, 0xff00ff, 0x00ffff],
     cyberpunk:[0xff00ff, 0x00ffff, 0xaa00ff, 0xff0088, 0x00ffaa, 0xffaa00],
     warm:     [0xff2200, 0xff6600, 0xffaa00, 0xff0000, 0xff3300, 0xffcc00],
+    magma:    [0xff0000, 0xff4500, 0xff8c00, 0xffd700, 0xd2691e, 0x8b0000],
     matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
     vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
     synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
@@ -1065,7 +1066,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21
+    'glacier': 20, 'hexagon': 21, 'tornado': 22
 };
 
 const laserUniforms = {
@@ -1328,6 +1329,13 @@ const laserVertexShader = `
           float angle = hexSpeed + floor(wn * 6.0) * (3.14159265 / 3.0);
           localPan = cos(angle) * radius + norm2 * 0.2 * sp;
           localTilt = uTilt + sin(angle) * radius;
+      }
+      else if (uPattern == 22) { // tornado
+          float tornadoSpeed = uTime * 2.0;
+          float tornadoRadius = 0.6 * sp * (1.0 + uKick * 0.3);
+          float heightOffset = aInstanceID * 0.15;
+          localPan = sin(tornadoSpeed + heightOffset) * tornadoRadius + norm2 * 0.1 * sp;
+          localTilt = uTilt + cos(tornadoSpeed + heightOffset) * tornadoRadius + (uMid * 0.2);
       }
       else {
           localTilt = uTilt;
@@ -1621,6 +1629,13 @@ const laserSpotsVertexShader = `
           float angle = hexSpeed + floor(wn * 6.0) * (3.14159265 / 3.0);
           localPan = cos(angle) * radius + norm2 * 0.2 * sp;
           localTilt = uTilt + sin(angle) * radius;
+      }
+      else if (uPattern == 22) { // tornado
+          float tornadoSpeed = uTime * 2.0;
+          float tornadoRadius = 0.6 * sp * (1.0 + uKick * 0.3);
+          float heightOffset = aInstanceID * 0.15;
+          localPan = sin(tornadoSpeed + heightOffset) * tornadoRadius + norm2 * 0.1 * sp;
+          localTilt = uTilt + cos(tornadoSpeed + heightOffset) * tornadoRadius + (uMid * 0.2);
       }
       else {
           localTilt = uTilt;
@@ -3643,6 +3658,10 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   if (CFG.theme === 'ocean' && playing && !isSilent) {
     // Force the liquid pattern when the ocean theme is active and music is playing
     wanted = 'liquid';
+
+  } else if (CFG.theme === 'magma' && playing && !isSilent) {
+    // Force the tornado pattern when the magma theme is active and music is playing
+    wanted = 'tornado';
 
   } else if (CFG.theme === 'synthwave' && playing && !isSilent) {
     // Force the vortex pattern when the synthwave theme is active and music is playing
@@ -5738,6 +5757,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const angle = hexSpeed + Math.floor(wn * 6.0) * (Math.PI / 3.0);
                     localPan = Math.cos(angle) * radius + norm2 * 0.2 * sp;
                     localTilt = tiltRad + Math.sin(angle) * radius;
+                    break;
+                }
+                case 'tornado': {
+                    const tornadoSpeed = tAnim * 2.0;
+                    const tornadoRadius = 0.6 * sp * (1.0 + kick * 0.3);
+                    const heightOffset = i * 0.15;
+                    localPan = Math.sin(tornadoSpeed + heightOffset) * tornadoRadius + norm2 * 0.1 * sp;
+                    localTilt = tiltRad + Math.cos(tornadoSpeed + heightOffset) * tornadoRadius + (mid * 0.2);
                     break;
                 }
                 default: {
