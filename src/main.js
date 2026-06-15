@@ -282,7 +282,7 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
-    domElement: document.createElement('canvas')
+    domElement: Object.assign(document.createElement('canvas'), { captureStream: () => new MediaStream() })
   };
   isWebGPU = false;
 }
@@ -3292,13 +3292,17 @@ function initAudioContext() {
         resume: async () => {},
         state: 'running',
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
-        decodeAudioData: async () => ({
-            duration: 10,
-            sampleRate: 44100,
-            length: 441000,
-            numberOfChannels: 1,
-            getChannelData: () => new Float32Array(441000)
-        })
+        decodeAudioData: (buffer, resolve, reject) => {
+            const mockBuffer = {
+                duration: 10,
+                sampleRate: 44100,
+                length: 441000,
+                numberOfChannels: 1,
+                getChannelData: () => new Float32Array(441000)
+            };
+            if (resolve) resolve(mockBuffer);
+            return Promise.resolve(mockBuffer);
+        }
     };
     analyser = audioCtx.createAnalyser();
     dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -4139,7 +4143,14 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    // Wrap decodeAudioData in a custom Promise for better error handling and Safari compat
+    audioBuffer = await new Promise((resolve, reject) => {
+        const decodeResult = audioCtx.decodeAudioData(ab, resolve, reject);
+        if (decodeResult) {
+            decodeResult.then(resolve).catch(reject);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4223,7 +4234,19 @@ async function loadAudio(file) {
         }
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
-        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        const OfflineAudioContextConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        let mockCtx;
+        if (OfflineAudioContextConstructor) {
+            mockCtx = new OfflineAudioContextConstructor(1, 44100, 44100);
+        } else {
+            mockCtx = audioCtx;
+        }
+
+        if (mockCtx && mockCtx.createBuffer) {
+            audioBuffer = mockCtx.createBuffer(1, 441000, 44100);
+        } else {
+            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -4281,7 +4304,19 @@ async function togglePlay() {
 
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      const OfflineAudioContextConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      let mockCtx;
+      if (OfflineAudioContextConstructor) {
+          mockCtx = new OfflineAudioContextConstructor(1, 44100, 44100);
+      } else {
+          mockCtx = audioCtx;
+      }
+
+      if (mockCtx && mockCtx.createBuffer) {
+          audioBuffer = mockCtx.createBuffer(1, 441000, 44100);
+      } else {
+          audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      }
       songMap = {
           bassMap: new Float32Array(100),
           midMap: new Float32Array(100),
@@ -6775,7 +6810,7 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
-                domElement: document.createElement('canvas')
+                domElement: Object.assign(document.createElement('canvas'), { captureStream: () => new MediaStream() })
             };
             postProcessing = null;
             isWebGPU = false;
