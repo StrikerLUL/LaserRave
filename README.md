@@ -6,6 +6,8 @@
 ---
 
 ## ⚠️ License & Usage Restrictions
+   IT IS ALL FREE TO USE AND YOU CAN USE IT FOR      ALL THINGS WITH PERMISSION!!
+
 
 This project is **for private / personal use only**.
 
