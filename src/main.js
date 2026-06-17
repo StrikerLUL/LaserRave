@@ -167,6 +167,7 @@ const CFG = {
     glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
     hexagon:  [0x00ffcc, 0xff00ff, 0xffff00, 0x00ccff, 0xff00cc, 0xccff00],
     bloodmoon:[0xff0000, 0x8b0000, 0xff4500, 0xdc143c, 0xff8c00, 0xb22222],
+    plasma:   [0xff00ff, 0x00ffff, 0x00ff00, 0xffff00, 0xff8800, 0xff0044],
   }
 };
 
@@ -1068,7 +1069,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'plasma-pulse': 23
 };
 
 const laserUniforms = {
@@ -1336,6 +1337,11 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // plasma-pulse
+          float pulse = sin(uTime * 3.0 + wn * 3.1415);
+          localPan = pulse * sp;
+          localTilt = uTilt + cos(uTime * 2.0) * 0.2 + uKick * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -1634,6 +1640,11 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // plasma-pulse
+          float pulse = sin(uTime * 3.0 + wn * 3.1415);
+          localPan = pulse * sp;
+          localTilt = uTilt + cos(uTime * 2.0) * 0.2 + uKick * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -3695,6 +3706,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'toxic-spill';
+
+  } else if (CFG.theme === 'plasma' && playing && !isSilent) {
+    wanted = 'plasma-pulse';
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
@@ -5824,6 +5838,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'plasma-pulse': {
+                    const pulse = Math.sin(tAnim * 3.0 + wn * Math.PI);
+                    localPan = pulse * sp;
+                    localTilt = tiltRad + Math.cos(tAnim * 2.0) * 0.2 + kick * 0.4;
                     break;
                 }
                 default: {
