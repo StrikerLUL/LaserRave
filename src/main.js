@@ -167,6 +167,7 @@ const CFG = {
     glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
     hexagon:  [0x00ffcc, 0xff00ff, 0xffff00, 0x00ccff, 0xff00cc, 0xccff00],
     bloodmoon:[0xff0000, 0x8b0000, 0xff4500, 0xdc143c, 0xff8c00, 0xb22222],
+    stardust: [0xffffff, 0xffd700, 0x87ceeb, 0xffff00, 0xadd8e6, 0xdaa520],
   }
 };
 
@@ -1068,7 +1069,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'stardust-sweep': 23
 };
 
 const laserUniforms = {
@@ -1336,6 +1337,10 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // stardust-sweep
+          localPan = sin(uTime * 3.0 + norm2 * 10.0) * sp;
+          localTilt = uTilt + cos(uTime * 5.0 + norm2 * 10.0) * 0.5 * uEnergy;
       }
       else {
           localTilt = uTilt;
@@ -1634,6 +1639,10 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // stardust-sweep
+          localPan = sin(uTime * 3.0 + norm2 * 10.0) * sp;
+          localTilt = uTilt + cos(uTime * 5.0 + norm2 * 10.0) * 0.5 * uEnergy;
       }
       else {
           localTilt = uTilt;
@@ -3715,6 +3724,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'stardust' && playing && !isSilent) {
+    wanted = 'stardust-sweep';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5903,6 +5914,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'liquid') {
                 // Smooth undulating opacity
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
+            } else if (pat === 'stardust-sweep') {
+                patternOpMod = (Math.sin(tAnim * 20.0 + i * 15.0) > 0.6) ? 1.0 : 0.4;
             }
         }
 
