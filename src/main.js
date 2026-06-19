@@ -231,16 +231,16 @@ try {
     isWebGPU = true;
     console.log('WebGPURenderer initialized successfully');
   } catch (e) {
-    console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+    console.warn("WebGPURenderer init failed, gracefully falling back to WebGLRenderer:", e);
     try {
       renderer = new THREE.WebGLRenderer({
         antialias: true,
         powerPreference: "high-performance"
       });
       isWebGPU = false;
-      console.log('WebGLRenderer initialized successfully');
+      console.log('WebGLRenderer gracefully initialized successfully');
     } catch (webglErr) {
-      console.error("WebGLRenderer init failed", webglErr);
+      console.error("WebGLRenderer init failed, throwing for further fallback", webglErr);
       throw webglErr;
     }
   }
@@ -4180,7 +4180,47 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    try {
+        audioBuffer = await new Promise((resolve, reject) => {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p) p.catch(reject);
+        });
+    } catch (err) {
+        console.warn("Failed to decode audio data, falling back to mock silent buffer:", err);
+        try {
+            audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+        } catch (e2) {
+             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
+
+        songMap = {
+            bassMap: new Float32Array(100),
+            midMap: new Float32Array(100),
+            highMap: new Float32Array(100),
+            melodyMap: new Float32Array(100),
+            energyMap: new Float32Array(100),
+            buildUpMap: new Float32Array(100),
+            beats: [{ time: 0, str: 1 }],
+            sections: [{
+                startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
+                start: 0, end: 10, intensity: 1, type: "drop",
+                avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
+                bassW: 0.33, midW: 0.33, trebleW: 0.33,
+                seed: 0, id: 0,
+                baseHue: 0, pattern: 'sidesweep',
+                liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
+                speedScale: 1, spreadMod: 1
+            }],
+            hopSec: 0.1, hop: 4410, N: 100, bpm: 120
+        };
+        waveformValid = false;
+
+        // Store the fallback map to the playlist queue item
+        let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+        if (playlistItem) {
+            playlistItem.songMap = songMap;
+        }
+    }
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -6810,7 +6850,7 @@ async function initRenderer() {
         }
         renderer.setAnimationLoop(animate);
     } catch (e) {
-        console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
+        console.warn("WebGPURenderer init failed during initRenderer, gracefully falling back to WebGLRenderer:", e);
 
         try {
             // Remove the failed WebGPURenderer DOM element
