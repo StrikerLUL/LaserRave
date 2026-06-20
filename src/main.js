@@ -167,6 +167,7 @@ const CFG = {
     glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
     hexagon:  [0x00ffcc, 0xff00ff, 0xffff00, 0x00ccff, 0xff00cc, 0xccff00],
     bloodmoon:[0xff0000, 0x8b0000, 0xff4500, 0xdc143c, 0xff8c00, 0xb22222],
+    meteor:   [0xff8800, 0xffff00, 0xffaa00, 0x8800ff, 0xffcc00, 0xaa00ff],
   }
 };
 
@@ -1068,7 +1069,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'meteor-shower': 23
 };
 
 const laserUniforms = {
@@ -1336,6 +1337,12 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // meteor-shower
+          float meteorSpeed = uTime * 3.0;
+          float fallOffset = fract(aInstanceID * 0.618 + meteorSpeed * 0.5);
+          localPan = norm2 * 1.5 * sp + sin(uTime * 2.0 + aInstanceID) * 0.2 * sp;
+          localTilt = uTilt - (fallOffset * 2.0 * sp) + (1.0 * sp) + uBass * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -1634,6 +1641,12 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // meteor-shower
+          float meteorSpeed = uTime * 3.0;
+          float fallOffset = fract(aInstanceID * 0.618 + meteorSpeed * 0.5);
+          localPan = norm2 * 1.5 * sp + sin(uTime * 2.0 + aInstanceID) * 0.2 * sp;
+          localTilt = uTilt - (fallOffset * 2.0 * sp) + (1.0 * sp) + uBass * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -3715,6 +3728,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'meteor' && playing && !isSilent) {
+    wanted = 'meteor-shower';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5824,6 +5839,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'meteor-shower': {
+                    const meteorSpeed = tAnim * 3.0;
+                    const fallOffset = (i * 0.618 + meteorSpeed * 0.5) % 1.0;
+                    localPan = norm2 * 1.5 * sp + Math.sin(tAnim * 2.0 + i) * 0.2 * sp;
+                    localTilt = tiltRad - (fallOffset * 2.0 * sp) + (1.0 * sp) + bass * 0.2;
                     break;
                 }
                 default: {
