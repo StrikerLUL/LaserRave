@@ -4180,7 +4180,10 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+      const p = audioCtx.decodeAudioData(ab, resolve, reject);
+      if (p) p.catch(reject);
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
