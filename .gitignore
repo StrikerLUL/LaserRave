@@ -23,6 +23,7 @@ lerna-debug.log*
 songs/
 
 # Test & debug scripts
+test-results/
 test-browser.cjs
 test_errors.mjs
 puppeteer-debug.mjs
