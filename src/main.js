@@ -128,7 +128,6 @@ updateGoboCanvas('stripes');
 //  CONFIG
 // ─────────────────────────────────────────────
 
-
 // ── Instanced Mesh System ──
 let mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM;
 let laserBodyIM, laserCoreIM, laserTubeIM;
@@ -242,7 +241,10 @@ try {
     setPixelRatio: () => {},
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
-    domElement: document.createElement('canvas')
+    clear: () => {},
+    domElement: Object.assign(document.createElement('canvas'), {
+        captureStream: () => new MediaStream()
+    })
   };
   isWebGPU = false;
 }
@@ -442,11 +444,15 @@ const rgbShiftPass = { enabled: false, uniforms: { amount: { get value() { retur
 // Rebuilds the TSL output chain to include only the active effects
 function rebuildPostChain() {
     if (!postProcessing || !sceneColor || !bloomNode) return;
-    let chain = sceneColor.add(bloomNode);
-    if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
-    if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
-    postProcessing.outputNode = chain.toneMapping(THREE.NeutralToneMapping);
-    postProcessing.needsUpdate = true;
+    try {
+        let chain = sceneColor.add(bloomNode);
+        if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
+        if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
+        postProcessing.outputNode = chain.toneMapping(THREE.NeutralToneMapping);
+        postProcessing.needsUpdate = true;
+    } catch (e) {
+        console.warn("Failed to rebuild post processing chain", e);
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -1042,7 +1048,8 @@ const PATTERN_IDS = {
     'fan': 0, 'wave': 1, 'xcross': 2, 'salvo': 3, 'tunnel': 4,
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
-    'starburst': 15, 'flame': 16
+    'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
 };
 
 const laserUniforms = {
@@ -1273,6 +1280,45 @@ const laserVertexShader = `
       else if (uPattern == 16) { // flame
           localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
           localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+      }
+      else if (uPattern == 17) { // supernova
+          float novaSpeed = uTime * 2.5;
+          float expandRadius = 0.3 + sin(novaSpeed * 0.5) * 0.7;
+          float angle = novaSpeed + wn * 3.14159265 * 8.0;
+          localPan = cos(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+          localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+      }
+      else if (uPattern == 18) { // phantom
+          float phantomSpeed = uTime * 0.8;
+          localPan  = sin(phantomSpeed + phaseOff * 3.0) * 0.8 * sp
+                     + cos(uTime * 0.5 + aInstanceID) * 0.2 * sp * norm2;
+          localTilt = uTilt + 0.1 * sp
+                     + sin(uTime * 1.2 + aInstanceID * 2.0) * 0.15 * sp * iPhase
+                     + uBass * 0.3;
+      }
+      else if (uPattern == 19) { // eclipse
+          float eclipseSpeed = uTime * 1.5;
+          float eclipseRadius = 0.4 * sp;
+          localPan = sin(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
+          localTilt = uTilt + cos(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius;
+      }
+      else if (uPattern == 20) { // glacier
+          float iceSpeed = uTime * 0.4;
+          float freezeRadius = 0.5 * sp;
+          localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
+          localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+      }
+      else if (uPattern == 21) { // hexagon
+          float hexSpeed = uTime * 1.5;
+          float radius = 0.4 * sp * (1.0 + uKick * 0.5);
+          float angle = hexSpeed + floor(wn * 6.0) * (3.14159265 / 3.0);
+          localPan = cos(angle) * radius + norm2 * 0.2 * sp;
+          localTilt = uTilt + sin(angle) * radius;
+      }
+      else if (uPattern == 22) { // blood-sweep
+          float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
+          localPan = sweep * sp * 1.5;
+          localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
       else {
           localTilt = uTilt;
@@ -1533,6 +1579,45 @@ const laserSpotsVertexShader = `
       else if (uPattern == 16) {
           localPan = norm2 * 0.5 * sp + sin(uTime * 2.0 + wn * 10.0) * 0.1 * sp;
           localTilt = uTilt + (sin(uTime * 5.0 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
+      }
+      else if (uPattern == 17) {
+          float novaSpeed = uTime * 2.5;
+          float expandRadius = 0.3 + sin(novaSpeed * 0.5) * 0.7;
+          float angle = novaSpeed + wn * 3.14159265 * 8.0;
+          localPan = cos(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+          localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + buConverge * 0.5);
+      }
+      else if (uPattern == 18) { // phantom
+          float phantomSpeed = uTime * 0.8;
+          localPan  = sin(phantomSpeed + phaseOff * 3.0) * 0.8 * sp
+                     + cos(uTime * 0.5 + aInstanceID) * 0.2 * sp * norm2;
+          localTilt = uTilt + 0.1 * sp
+                     + sin(uTime * 1.2 + aInstanceID * 2.0) * 0.15 * sp * iPhase
+                     + uBass * 0.3;
+      }
+      else if (uPattern == 19) { // eclipse
+          float eclipseSpeed = uTime * 1.5;
+          float eclipseRadius = 0.4 * sp;
+          localPan = sin(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
+          localTilt = uTilt + cos(eclipseSpeed + aInstanceID * 0.5) * eclipseRadius;
+      }
+      else if (uPattern == 20) { // glacier
+          float iceSpeed = uTime * 0.4;
+          float freezeRadius = 0.5 * sp;
+          localPan = sin(iceSpeed + aInstanceID * 0.2) * freezeRadius + norm2 * 0.3 * sp;
+          localTilt = uTilt + cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+      }
+      else if (uPattern == 21) { // hexagon
+          float hexSpeed = uTime * 1.5;
+          float radius = 0.4 * sp * (1.0 + uKick * 0.5);
+          float angle = hexSpeed + floor(wn * 6.0) * (3.14159265 / 3.0);
+          localPan = cos(angle) * radius + norm2 * 0.2 * sp;
+          localTilt = uTilt + sin(angle) * radius;
+      }
+      else if (uPattern == 22) { // blood-sweep
+          float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
+          localPan = sweep * sp * 1.5;
+          localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
       else {
           localTilt = uTilt;
@@ -3162,7 +3247,84 @@ function initAudioContext() {
     dataArray = new Uint8Array(analyser.frequencyBinCount);
     return true;
   } catch (e) {
-    console.warn("Failed to initialize AudioContext:", e);
+    console.warn("Failed to initialize AudioContext, falling back to mock objects:", e);
+
+    audioCtx = {
+        sampleRate: 44100,
+        currentTime: performance.now() / 1000,
+        destination: {},
+        createAnalyser: () => ({
+            fftSize: 2048,
+            frequencyBinCount: 1024,
+            connect: () => {},
+            disconnect: () => {},
+            getByteFrequencyData: (arr) => { if(arr) arr.fill(0); }
+        }),
+        createBuffer: (channels, length, sampleRate) => {
+            try {
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    const buf = tempCtx.createBuffer(channels, length, sampleRate);
+                    tempCtx.close().catch(() => {});
+                    return buf;
+                }
+            } catch (e) {
+                // fall through
+            }
+            return {
+                duration: length / sampleRate,
+                length: length,
+                sampleRate: sampleRate,
+                numberOfChannels: channels,
+                getChannelData: () => new Float32Array(length)
+            };
+        },
+        createBufferSource: () => ({
+            buffer: null,
+            connect: () => {},
+            disconnect: () => {},
+            start: () => {},
+            stop: () => {},
+            loop: false,
+            onended: null
+        }),
+        createBiquadFilter: () => ({
+            type: 'lowpass',
+            frequency: { value: 1000 },
+            Q: { value: 1 },
+            connect: () => {}
+        }),
+        createGain: () => ({
+            gain: { value: 1 },
+            connect: () => {}
+        }),
+        resume: async () => {},
+        state: 'running',
+        createMediaStreamDestination: () => ({ stream: new MediaStream() }),
+        decodeAudioData: async () => {
+            try {
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                    return buf;
+                }
+            } catch (e) {
+                // fall through
+            }
+            return {
+                duration: 10,
+                sampleRate: 44100,
+                length: 441000,
+                numberOfChannels: 1,
+                getChannelData: () => new Float32Array(441000)
+            };
+        }
+    };
+    analyser = audioCtx.createAnalyser();
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
     return false;
   }
 }
@@ -3526,9 +3688,21 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'dna';
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
+    wanted = 'scatter';
+  } else if (CFG.theme === 'eclipse' && playing && !isSilent) {
+    wanted = 'eclipse';
+  } else if (CFG.theme === 'supernova' && playing && !isSilent) {
     wanted = 'supernova';
+  } else if (CFG.theme === 'phantom' && playing && !isSilent) {
+    wanted = 'phantom';
   } else if (CFG.theme === 'quasar' && playing && !isSilent) {
     wanted = 'quasar-spin';
+  } else if (CFG.theme === 'glacier' && playing && !isSilent) {
+    wanted = 'glacier';
+  } else if (CFG.theme === 'hexagon' && playing && !isSilent) {
+    wanted = 'hexagon';
+  } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
+    wanted = 'blood-sweep';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -3635,7 +3809,7 @@ async function renderBand(buf, loHz, hiHz) {
     const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OfflineCtxConstructor) {
       console.warn("OfflineAudioContext not supported, using fallback band array.");
-      return new Float32Array(buf.length);
+      return new Float32Array(buf.length || 441000);
     }
 
     const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
@@ -3659,7 +3833,7 @@ async function renderBand(buf, loHz, hiHz) {
 
   } catch (error) {
     console.error("Error in renderBand:", error);
-    return new Float32Array(buf.length);
+    return new Float32Array(buf ? buf.length || 441000 : 441000);
   }
 }
 
@@ -3928,8 +4102,10 @@ async function analyzeSong(audioBuf, fileName) {
   return { bassMap, midMap, highMap, melodyMap, songLyrics, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
   } catch (err) {
     console.error("Analysis failed, returning fallback map:", err);
-    document.getElementById('btn-play-pause').disabled = false;
-    document.getElementById('btn-render').disabled = false;
+    const btnPP = document.getElementById('btn-play-pause');
+    if (btnPP) btnPP.disabled = false;
+    const btnR = document.getElementById('btn-render');
+    if (btnR) btnR.disabled = false;
     return {
       bassMap: new Float32Array(100),
       midMap: new Float32Array(100),
@@ -4069,22 +4245,49 @@ async function loadAudio(file) {
     // Graceful fallback for audio buffer
     try {
         initAudioContext();
-        if (audioCtx) {
-            audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
-            songMap = {
-                bpm: 120,
-                beats: [{ time: 0, strength: 1 }],
-                sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-                bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
-                hopSec: 0.1, N: 100
-            };
-            waveformValid = false;
-        } else {
-            throw new Error("No audioCtx available for fallback");
+        if (!audioCtx) throw new Error("No audioCtx available for fallback");
+
+        let localAudioBuffer = null;
+        try {
+            localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+        } catch (e) {
+            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            if (TempAudioContext) {
+                const tempCtx = new TempAudioContext();
+                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                tempCtx.close().catch(() => {});
+            } else {
+                throw e;
+            }
         }
+
+        if (!localAudioBuffer) throw new Error("Could not create actual AudioBuffer instance");
+
+        audioBuffer = localAudioBuffer;
+        songMap = {
+            bpm: 120,
+            beats: [{ time: 0, strength: 1 }],
+            sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
+            bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
+            hopSec: 0.1, N: 100
+        };
+        waveformValid = false;
     } catch (fallbackError) {
         console.error("Fallback audio generation failed:", fallbackError);
-        audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+        // Attempt one last time to create an AudioBuffer, otherwise use the plain object
+        try {
+            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            if (TempAudioContext) {
+                const tempCtx = new TempAudioContext();
+                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                tempCtx.close().catch(() => {});
+            } else {
+                throw new Error("No AudioContext");
+            }
+        } catch (e2) {
+             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
+
         songMap = {
             bassMap: new Float32Array(100),
             midMap: new Float32Array(100),
@@ -4142,7 +4345,19 @@ async function togglePlay() {
 
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
-      audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, getChannelData: () => new Float32Array(441000) };
+      try {
+          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+          if (TempAudioContext) {
+              const tempCtx = new TempAudioContext();
+              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+              tempCtx.close().catch(() => {});
+          } else {
+              throw new Error("No AudioContext");
+          }
+      } catch (e2) {
+           audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+      }
+
       songMap = {
           bassMap: new Float32Array(100),
           midMap: new Float32Array(100),
@@ -4163,6 +4378,7 @@ async function togglePlay() {
           }],
           hopSec: 0.1, hop: 4410, N: 100, bpm: 120
       };
+      waveformValid = false;
     }
   }
   if (audioCtx && audioCtx.state === 'suspended') {
@@ -4241,7 +4457,10 @@ function toggleRecording() {
       try { analyser.disconnect(); } catch(e){}
       analyser.connect(mediaStreamDest);
 
-      const canvasStream = renderer.domElement.captureStream(60);
+      const canvasStream = typeof renderer.domElement.captureStream === 'function'
+          ? renderer.domElement.captureStream(60)
+          : null;
+      if (!canvasStream) throw new Error("captureStream not supported");
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
         ...mediaStreamDest.stream.getAudioTracks()
@@ -5599,6 +5818,34 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + (Math.sin(flameSpeed * 2.5 + wn * 5.0) * 0.5 + 0.5) * 0.3 * sp;
                     break;
                 }
+                case 'eclipse': {
+                    const eclipseSpeed = tAnim * 1.5;
+                    const eclipseRadius = 0.4 * sp;
+                    localPan = Math.sin(eclipseSpeed + i * 0.5) * eclipseRadius + norm2 * 0.5 * sp;
+                    localTilt = tiltRad + Math.cos(eclipseSpeed + i * 0.5) * eclipseRadius;
+                    break;
+                }
+                case 'glacier': {
+                    const iceSpeed = tAnim * 0.4;
+                    const freezeRadius = 0.5 * sp;
+                    localPan = Math.sin(iceSpeed + i * 0.2) * freezeRadius + norm2 * 0.3 * sp;
+                    localTilt = tiltRad + Math.cos(iceSpeed * 0.8 + lyp) * freezeRadius * 0.5 + 0.1 * sp;
+                    break;
+                }
+                case 'hexagon': {
+                    const hexSpeed = tAnim * 1.5;
+                    const radius = 0.4 * sp * (1.0 + kick * 0.5);
+                    const angle = hexSpeed + Math.floor(wn * 6.0) * (Math.PI / 3.0);
+                    localPan = Math.cos(angle) * radius + norm2 * 0.2 * sp;
+                    localTilt = tiltRad + Math.sin(angle) * radius;
+                    break;
+                }
+                case 'blood-sweep': {
+                    const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
+                    localPan = sweep * sp * 1.5;
+                    localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -6719,9 +6966,13 @@ async function initRenderer() {
                 setPixelRatio: () => {},
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
-                domElement: document.createElement('canvas')
+                clear: () => {},
+                domElement: Object.assign(document.createElement('canvas'), {
+                    captureStream: () => new MediaStream()
+                })
             };
             postProcessing = null;
+            isWebGPU = false;
 
             if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
         }
