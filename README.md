@@ -21,6 +21,12 @@ See the [LICENSE](./LICENSE) file for full terms.
 
 ---
 
+
+## 🎥 See it in Action
+
+Check out videos and photos of the simulator in action on my TikTok:  
+👉 **[@strikerlulu1 on TikTok](https://www.tiktok.com/@strikerlulu1)**
+
 ## ✨ Features
 
 | Feature | Description |
@@ -151,7 +157,13 @@ npm run dev
 LaserRave/
 ├── index.html          # App entry point & UI layout
 ├── src/
-│   ├── main.js         # Core simulator (3D scene, audio engine, animation loop)
+│   ├── main.js         # Core simulator orchestrator
+│   ├── config.js       # Central configuration and Laser Presets
+│   ├── PostProcessing.js # TSL Node-based Bloom, VHS, Film Post-FX
+│   ├── AudioProcessor.js # Web Audio API processing module
+│   ├── LaserEngine.js  # Laser generation and choreography module
+│   ├── CameraManager.js # TV Mode and Drone Camera module
+│   ├── UIManager.js    # DOM event listeners and UI module
 │   ├── style.css       # Glassmorphism UI styles
 │   ├── ai-worker.js    # Background audio-analysis / stem-separation worker
 │   └── pyro-worker.js  # Pyrotechnics particle physics worker
@@ -169,16 +181,8 @@ LaserRave/
 
 ## 🐛 Known Issues
 
-### 🔥 Pyrotechnics System (Work in Progress)
-The pyrotechnics system (flames and spark bursts) is **not yet fully functional**. While the system fires on drop events and basic particle emission works, the curl-noise fluid dynamics, correct burst timing, and visual fidelity are still being refined.
-
-**This is the next major feature to be fixed and improved.**
-
-Planned improvements:
-- Correct burst trigger timing on the exact millisecond of a drop
-- Improved curl-noise fluid simulation for realistic flame behavior
-- Spark physics with proper gravity and wind drift
-- Flame color temperature variation (blue core → orange tips)
+### 🔥 Pyrotechnics System
+The pyrotechnics system (flames and spark bursts) has been deeply optimized using **SharedArrayBuffer** and Web Workers. The curl-noise fluid dynamics and particle updates now calculate completely off the main thread with zero-copy memory transfers, guaranteeing a stable 60 FPS even during massive drops.
 
 ---
 
