@@ -1,3 +1,4 @@
+import { CFG } from './config.js';
 import { computeFormation } from './utils/computeFormation.js';
 import * as THREE from 'three';
 import { pass, uniform, texture, uv, vec4, vec2, length, smoothstep, color as tslColor, positionLocal } from 'three/tsl';
@@ -126,43 +127,7 @@ updateGoboCanvas('stripes');
 // ─────────────────────────────────────────────
 //  CONFIG
 // ─────────────────────────────────────────────
-const CFG = {
-  stageSize:     'large',  // 'large' or 'small'
-  laserCount:    180,      // Massive stage scale
-  movingHeadCount: 120,    // Massive stage scale
-  intensity:     1.0,
-  speed:         1.0,
-  mhIntensity:   1.0,
-  mhSpeed:       1.0,
-  ulIntensity:   1.0,
-  spread:        1.2,
-  thickness:     1.0,
-  tilt:          30,
-  theme:         'dynamic',
-  formation:     'front',   // 'front'|'twin'|'sides'|'surround'|'corners'|'aerial'
-  beamsPerLaser: 1,        // 1–5 beams per projector
-  beamSpread:    0.28,     // radians – total fan angle across all beams
-  hazeDensity:   0.65,     // 0–1
-  screenBrightness: 1.0,
-  screenReactivity: 1.0,
-  themes: {
-    dynamic:  [0xffffff], // Will be overridden in animation loop
-    rgb:      [0xff2222, 0x22ff44, 0x2244ff, 0xffff00, 0xff00ff, 0x00ffff],
-    cyberpunk:[0xff00ff, 0x00ffff, 0xaa00ff, 0xff0088, 0x00ffaa, 0xffaa00],
-    warm:     [0xff2200, 0xff6600, 0xffaa00, 0xff0000, 0xff3300, 0xffcc00],
-    matrix:   [0x00ff00, 0x00cc00, 0x00ff88, 0x44ff44, 0x00ff44, 0x88ff00],
-    vortex:   [0x8a2be2, 0x4b0082, 0x0000ff, 0xff00ff, 0x9400d3, 0x4169e1],
-    synthwave:[0xff00ff, 0x00ffff, 0x4400ff, 0xff00aa, 0x00aaff, 0xaa00ff],
-    ocean:    [0x001133, 0x0055ff, 0x00aaff, 0x00ffff, 0x00ffcc, 0x1177aa],
-    aurora:   [0x00ff88, 0x00ccff, 0x8800ff, 0x00ffcc, 0x0088ff, 0xcc00ff],
-    toxic:    [0x33ff00, 0xccff00, 0x8800ff, 0x00ff33, 0xffff00, 0x5500aa],
-    neoncity: [0xff0055, 0x00ffcc, 0xffdd00, 0xcc00ff, 0x00ff66, 0xff00aa],
-    cosmic:   [0x9b59b6, 0x8e44ad, 0xffffff, 0xff66cc, 0x330066, 0xcc99ff],
-    quasar:   [0x0044ff, 0xff0044, 0xff00ff, 0x00ffff, 0xffffff, 0x8800ff],
-    toxic:    [0x39ff14, 0x8a2be2, 0x00ff00, 0x9400d3, 0x7fff00, 0x4b0082],
-    inferno:  [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffaa00, 0xff2200],
-  }
-};
+
 
 // ── Instanced Mesh System ──
 let mhBaseIM, mhYokeIM, mhHeadIM, mhCoreIM, mhWashIM;
@@ -218,7 +183,8 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
-    renderer = new WebGPURenderer({
+    throw new Error("Force WebGL Fallback to support ShaderMaterial");
+    renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
       powerPreference: "high-performance"
     });
@@ -385,15 +351,44 @@ const LASER_FONT = {
 };
 
 const tvCameras = [
-    { pos: new THREE.Vector3(0, 8, 45), look: new THREE.Vector3(0, 10, -15) },   // Front center wide (TikTok safe, further back)
-    { pos: new THREE.Vector3(-18, 6, 30), look: new THREE.Vector3(0, 8, -15) },  // Side left deep, avoids direct beam paths
-    { pos: new THREE.Vector3(18, 6, 30), look: new THREE.Vector3(0, 8, -15) },   // Side right deep
-    { pos: new THREE.Vector3(0, 35, 28), look: new THREE.Vector3(0, 5, -15) },   // High birds eye pushed back
-    { pos: new THREE.Vector3(-12, 3, 15), look: new THREE.Vector3(4, 12, -20) }, // DJ Booth left but pushed back out of heavy lasers
-    { pos: new THREE.Vector3(12, 3, 15), look: new THREE.Vector3(-4, 12, -20) }, // DJ Booth right pushed back
-    { pos: new THREE.Vector3(0, 2, 35), look: new THREE.Vector3(0, 14, -15) },   // Far crowd center looking up (great for vertical aspect)
-    { pos: new THREE.Vector3(-22, 18, 5), look: new THREE.Vector3(0, 6, -15) },  // Panned left looking down
-    { pos: new THREE.Vector3(22, 18, 5), look: new THREE.Vector3(0, 6, -15) }    // Panned right looking down
+    // 1. Wide front angle from low down, looking slightly upwards and diagonally across the lasers
+    { pos: new THREE.Vector3(-25, 2, 35), look: new THREE.Vector3(15, 12, -10) }, 
+    
+    // 2. Wide front right from low down, looking leftwards and upwards across
+    { pos: new THREE.Vector3(25, 2, 35), look: new THREE.Vector3(-15, 12, -10) },
+    
+    // 3. Side profile left, very low, looking across the middle (great depth, no direct lasers)
+    { pos: new THREE.Vector3(-35, 4, 10), look: new THREE.Vector3(35, 8, -15) },
+    
+    // 4. Side profile right, very low, looking across the middle
+    { pos: new THREE.Vector3(35, 4, 10), look: new THREE.Vector3(-35, 8, -15) },
+    
+    // 5. High top-down perspective from an angle, looking diagonally down
+    { pos: new THREE.Vector3(-18, 38, 15), look: new THREE.Vector3(12, 0, -20) },
+    
+    // 6. Extreme corner perspective, looking diagonally through the show
+    { pos: new THREE.Vector3(30, 8, 40), look: new THREE.Vector3(-20, 10, -25) },
+    
+    // 7. Behind DJ booth right, looking diagonally into the crowd / show area (lasers shooting away)
+    { pos: new THREE.Vector3(18, 5, -18), look: new THREE.Vector3(-15, 15, 35) },
+    
+    // 8. Behind DJ booth left, looking diagonally into the crowd
+    { pos: new THREE.Vector3(-18, 5, -18), look: new THREE.Vector3(15, 15, 35) },
+    
+    // 9. Floating slightly above crowd, strong angle
+    { pos: new THREE.Vector3(15, 16, 25), look: new THREE.Vector3(-15, 5, -20) },
+    
+    // 10. Far sweeping perspective, ground level, looking up
+    { pos: new THREE.Vector3(-30, 1, 45), look: new THREE.Vector3(20, 18, -10) },
+    
+    // 11. Over the shoulder extreme zoom feel, but offset so lasers pass by
+    { pos: new THREE.Vector3(12, 4, 50), look: new THREE.Vector3(-5, 12, -20) },
+    
+    // 12. Panned side left looking at a specific focus point
+    { pos: new THREE.Vector3(-40, 15, 5), look: new THREE.Vector3(10, 5, -15) },
+    
+    // 13. Dynamic sweeping up shot from the front edge
+    { pos: new THREE.Vector3(0, 1, 20), look: new THREE.Vector3(0, 25, -25) }
 ];
 
 const baseCamPos = new THREE.Vector3(0, 10, 45);
@@ -735,11 +730,19 @@ class PyroSystem {
 
         this.geo = new THREE.BufferGeometry();
         const n = maxParticles;
-        this.posAttr   = new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
-        this.ageAttr   = new THREE.BufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage);
-        this.ltAttr    = new THREE.BufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage);
-        this.sizeAttr  = new THREE.BufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage);
-        this.colorAttr = new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+        
+        // Use SharedArrayBuffer for zero-copy worker communication
+        const posBuffer = new SharedArrayBuffer(n * 3 * 4);
+        const ageBuffer = new SharedArrayBuffer(n * 4);
+        const ltBuffer = new SharedArrayBuffer(n * 4);
+        const sizeBuffer = new SharedArrayBuffer(n * 4);
+        const colorBuffer = new SharedArrayBuffer(n * 3 * 4);
+        
+        this.posAttr   = new THREE.BufferAttribute(new Float32Array(posBuffer), 3).setUsage(THREE.DynamicDrawUsage);
+        this.ageAttr   = new THREE.BufferAttribute(new Float32Array(ageBuffer), 1).setUsage(THREE.DynamicDrawUsage);
+        this.ltAttr    = new THREE.BufferAttribute(new Float32Array(ltBuffer), 1).setUsage(THREE.DynamicDrawUsage);
+        this.sizeAttr  = new THREE.BufferAttribute(new Float32Array(sizeBuffer), 1).setUsage(THREE.DynamicDrawUsage);
+        this.colorAttr = new THREE.BufferAttribute(new Float32Array(colorBuffer), 3).setUsage(THREE.DynamicDrawUsage);
         this.geo.setAttribute('position', this.posAttr);
         this.geo.setAttribute('aAge',     this.ageAttr);
         this.geo.setAttribute('aLifetime',this.ltAttr);
@@ -755,18 +758,12 @@ class PyroSystem {
         pyroWorker.postMessage({
             type: 'init',
             id: this.id,
-            config: { x, y, z, type, maxParticles, emitDir, spread }
+            config: { x, y, z, type, maxParticles, emitDir, spread, posBuffer, ageBuffer, ltBuffer, sizeBuffer, colorBuffer }
         });
 
         this.onWorkerMessage = (e) => {
-            const { type, id, posArray, ageArray, ltArray, sizeArray, colorArray } = e.data;
+            const { type, id } = e.data;
             if (type === 'updated' && id === this.id) {
-                this.posAttr.array = posArray;
-                this.ageAttr.array = ageArray;
-                this.ltAttr.array = ltArray;
-                this.sizeAttr.array = sizeArray;
-                this.colorAttr.array = colorArray;
-
                 this.posAttr.needsUpdate = true;
                 this.ageAttr.needsUpdate = true;
                 this.ltAttr.needsUpdate = true;
@@ -774,7 +771,6 @@ class PyroSystem {
                 this.colorAttr.needsUpdate = true;
                 this.geo.setDrawRange(0, this.maxParticles);
                 this.isUpdating = false;
-                this.points.visible = true;
             }
         };
 
@@ -784,22 +780,14 @@ class PyroSystem {
     update(dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak) {
         if (this.isUpdating) return;
         this.isUpdating = true;
-        this.points.visible = false;
-
-        const posArray = this.posAttr.array;
-        const ageArray = this.ageAttr.array;
-        const ltArray = this.ltAttr.array;
-        const sizeArray = this.sizeAttr.array;
-        const colorArray = this.colorAttr.array;
 
         pyroWorker.postMessage({
             type: 'update',
             id: this.id,
             data: {
-                dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak,
-                posArray, ageArray, ltArray, sizeArray, colorArray
+                dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak
             }
-        }, [posArray.buffer, ageArray.buffer, ltArray.buffer, sizeArray.buffer, colorArray.buffer]);
+        });
     }
 
     dispose() {
@@ -1074,6 +1062,7 @@ const laserUniforms = {
     uSalvoZ: { value: 0 },
     uTunnelOmega: { value: 0 },
     uMelody: { value: 0 },
+    uTransient: { value: 0 },
     uPlaying: { value: 0 },
     uEnergyChaosBase: { value: 0 },
     uActivity: { value: 0 },
@@ -1118,6 +1107,7 @@ const laserVertexShader = `
   uniform float uSalvoZ;
   uniform float uTunnelOmega;
   uniform float uMelody;
+  uniform float uTransient;
   uniform float uPlaying;
   uniform float uEnergyChaosBase;
   uniform float uActivity;
@@ -1375,6 +1365,7 @@ const laserSpotsVertexShader = `
   uniform float uSalvoZ;
   uniform float uTunnelOmega;
   uniform float uMelody;
+  uniform float uTransient;
   uniform float uPlaying;
   uniform float uEnergyChaosBase;
   uniform float uActivity;
@@ -3345,6 +3336,10 @@ async function playPlaylistItem(idx) {
     songMap = item.songMap;
     waveformValid = false;
     
+    const ta = document.getElementById('param-lyrics-json');
+    if (ta && songMap && songMap.songLyrics) ta.value = JSON.stringify(songMap.songLyrics, null, 2);
+    else if (ta) ta.value = "";
+
     document.getElementById('track-name').textContent = item.name;
     document.getElementById('song-timeline').classList.remove('hidden');
     switchMode(currentMode);
@@ -3724,7 +3719,7 @@ async function analyzeSong(audioBuf, fileName) {
       renderBand(audioBuf,    0,    0),
     ]);
 
-    let bassMap, midMap, highMap, melodyMap;
+    let bassMap, midMap, highMap, melodyMap, songLyrics = [];
     const fastAnalysisChecked = document.getElementById('param-fast-analysis')?.checked;
 
     if (fastAnalysisChecked) {
@@ -3745,7 +3740,11 @@ async function analyzeSong(audioBuf, fileName) {
       if (fallbackWarning) fallbackWarning.style.display = 'none';
       
       await new Promise((resolve, reject) => {
-          worker.onmessage = (e) => {
+          worker.onerror = (err) => {
+            console.error('Worker Error:', err.message || err);
+            reject(err);
+        };
+        worker.onmessage = (e) => {
               if (e.data.type === 'progress') {
                   setProgress(32 + e.data.percent * 0.15, e.data.message);
               } else if (e.data.type === 'fallback_active') {
@@ -3766,6 +3765,7 @@ async function analyzeSong(audioBuf, fileName) {
       midMap    = aiStems.vocals;
       highMap   = aiStems.drums;
       melodyMap = aiStems.melody;
+      songLyrics = aiStems.lyrics || [];
     }
 
     setProgress(48, '⏳ Computing energy & beats…');
@@ -3921,8 +3921,11 @@ async function analyzeSong(audioBuf, fileName) {
   document.getElementById('song-timeline').classList.remove('hidden');
   switchMode(currentMode); // Ensure correct parts are hidden/shown
   
+  const ta = document.getElementById('param-lyrics-json');
+  if (ta) ta.value = JSON.stringify(songLyrics, null, 2);
+
   console.log(`Song analyzed: ${beats.length} beats @ ${estimatedBPM} BPM, ${sections.length} sections`);
-  return { bassMap, midMap, highMap, melodyMap, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
+  return { bassMap, midMap, highMap, melodyMap, songLyrics, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
   } catch (err) {
     console.error("Analysis failed, returning fallback map:", err);
     document.getElementById('btn-play-pause').disabled = false;
@@ -4560,6 +4563,28 @@ document.getElementById('param-laserwriter-mode').addEventListener('change', e =
     compileScannerPoints();
 });
 
+let autoSyncLyrics = true;
+
+document.getElementById('param-lyric-sync-enable')?.addEventListener('change', e => {
+    autoSyncLyrics = e.target.checked;
+});
+
+document.getElementById('btn-apply-lyrics')?.addEventListener('click', () => {
+    try {
+        const jsonStr = document.getElementById('param-lyrics-json').value;
+        const parsed = JSON.parse(jsonStr);
+        if (songMap) {
+            songMap.songLyrics = parsed;
+            alert("Lyrics erfolgreich aktualisiert!");
+        } else {
+            alert("Es ist aktuell kein Song geladen!");
+        }
+    } catch (err) {
+        alert("Fehler beim Speichern der Lyrics. Bitte auf gültiges JSON-Format achten.");
+        console.error(err);
+    }
+});
+
 document.getElementById('param-laserwriter-text').addEventListener('input', e => {
     laserWriterText = e.target.value || ' ';
     compileScannerPoints();
@@ -4652,7 +4677,7 @@ document.getElementById('param-fx-vhs').addEventListener('change', e => {
   rebuildPostChain();
 });
 
-let fxFlareEnabled = true;
+
 document.getElementById('param-fx-flare').addEventListener('change', e => { 
   fxFlareEnabled = e.target.checked;
   movingHeadObjects.forEach(mh => {
@@ -5304,7 +5329,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
     laserUniforms.uSalvoX.value = salvoX;
     laserUniforms.uSalvoZ.value = salvoZ;
     laserUniforms.uTunnelOmega.value = tunnelOmega;
+    const transient = high > 0.8 ? (high - 0.8) * 5.0 : 0.0;
     laserUniforms.uMelody.value = melody;
+    laserUniforms.uTransient.value = transient;
     laserUniforms.uPlaying.value = playing ? 1.0 : 0.0;
     laserUniforms.uEnergyChaosBase.value = energyChaosBase;
     laserUniforms.uActivity.value = activity;
@@ -5711,6 +5738,54 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
     if (colorDirty && laserTubeIM.instanceColor) laserTubeIM.instanceColor.needsUpdate = true;
 }
 
+
+// ── Dynamic FPS LOD State ─────────────
+let recentFPS = [];
+let currentLODLevel = 0; // 0 = High, 1 = Medium, 2 = Low
+let lodCheckTimer = 0;
+
+function updateDynamicLOD(dt) {
+    if (!dt || dt === 0) return;
+    const fps = 1 / dt;
+    recentFPS.push(fps);
+    if (recentFPS.length > 60) recentFPS.shift(); // 60 frames average
+
+    lodCheckTimer += dt;
+    if (lodCheckTimer > 1.0) { // Check every 1 second
+        let avgFPS = recentFPS.reduce((a, b) => a + b, 0) / recentFPS.length;
+        
+        let newLOD = currentLODLevel;
+        if (avgFPS < 35) {
+            newLOD = Math.min(2, currentLODLevel + 1); // Downgrade
+        } else if (avgFPS > 55) {
+            newLOD = Math.max(0, currentLODLevel - 1); // Upgrade
+        }
+        
+        if (newLOD !== currentLODLevel) {
+            currentLODLevel = newLOD;
+            // console.log('Dynamic LOD Level changed to:', currentLODLevel, 'Avg FPS:', avgFPS.toFixed(1));
+            
+            // Adjust bloom and flares globally
+            const flareEl = document.getElementById('param-fx-flare');
+            const crowdEl = document.getElementById('param-livecrowd');
+            
+            if (currentLODLevel === 2) { // Low
+                // Disable flares
+                if (flareEl && flareEl.checked) { flareEl.checked = false; flareEl.dispatchEvent(new Event('change')); }
+                // Disable crowd
+                if (crowdEl && crowdEl.checked) { crowdEl.checked = false; crowdEl.dispatchEvent(new Event('change')); }
+            } else if (currentLODLevel === 1) { // Medium
+                if (flareEl && flareEl.checked) { flareEl.checked = false; flareEl.dispatchEvent(new Event('change')); }
+                if (crowdEl && !crowdEl.checked) { crowdEl.checked = true; crowdEl.dispatchEvent(new Event('change')); }
+            } else if (currentLODLevel === 0) { // High
+                if (flareEl && !flareEl.checked) { flareEl.checked = true; flareEl.dispatchEvent(new Event('change')); }
+                if (crowdEl && !crowdEl.checked) { crowdEl.checked = true; crowdEl.dispatchEvent(new Event('change')); }
+            }
+        }
+        lodCheckTimer = 0;
+    }
+}
+
 function animate() {
   // Using setAnimationLoop below instead of requestAnimationFrame
 
@@ -5805,6 +5880,30 @@ function animate() {
   // ── Song-map frame lookup (Stems) ────────────────────────────
   const frame   = playing ? getSongFrame()      : null;
   const section = playing ? getCurrentSection() : null;
+
+  if (playing && autoSyncLyrics && songMap) {
+      const now = getPlaybackTime();
+      let currentLyricObj = null;
+      if (songMap.songLyrics && songMap.songLyrics.length > 0) {
+          for (let i = songMap.songLyrics.length - 1; i >= 0; i--) {
+              const lyric = songMap.songLyrics[i];
+              if (now >= lyric.timestamp[0]) {
+                  if (lyric.timestamp[1] === null || now <= lyric.timestamp[1] + 1.5) {
+                      currentLyricObj = lyric;
+                  }
+                  break;
+              }
+          }
+      }
+
+      const targetText = currentLyricObj ? currentLyricObj.text.trim().toUpperCase() : ' ';
+      if (laserWriterText !== targetText) {
+          laserWriterText = targetText;
+          const el = document.getElementById('param-laserwriter-text');
+          if (el) el.value = targetText;
+          compileScannerPoints();
+      }
+  }
 
   if (playing && section) {
       const secId = (section.id !== undefined) ? section.id : 0;
@@ -6200,20 +6299,34 @@ function animate() {
         if (tvModeEnabled) {
             // TV Jumps Camera Cuts
             let camObj = tvCameras[currentTvCamIdx % tvCameras.length];
-            // slight slow drift inside the shot
-            targetX = camObj.pos.x + Math.sin(t * 0.15) * 1.5;
-            targetY = camObj.pos.y + Math.sin(t * 0.22) * 0.5;
-            targetZ = camObj.pos.z + Math.cos(t * 0.18) * 1.5;
-            lookX = camObj.look.x + Math.sin(t * 0.1) * 0.5;
-            lookY = camObj.look.y + Math.cos(t * 0.1) * 0.5;
-            lookZ = camObj.look.z;
+            
+            // dynamic slow drift inside the shot, with some variance based on current index
+            let driftAmp = 1.5 + (currentTvCamIdx % 3) * 2.0; // varies from 1.5 to 5.5
+            let driftSpeed = 0.1 + (currentTvCamIdx % 4) * 0.05; // varies from 0.1 to 0.25
+
+            targetX = camObj.pos.x + Math.sin(t * driftSpeed) * driftAmp;
+            targetY = camObj.pos.y + Math.sin(t * (driftSpeed * 1.47)) * (driftAmp * 0.6);
+            targetZ = camObj.pos.z + Math.cos(t * (driftSpeed * 1.23)) * driftAmp;
+            
+            // Add a little dynamic look drift as well
+            lookX = camObj.look.x + Math.sin(t * 0.1) * 1.5;
+            lookY = camObj.look.y + Math.cos(t * 0.15) * 1.0;
+            lookZ = camObj.look.z + Math.sin(t * 0.12) * 1.5;
+            
+            // Add smooth beat pump for energy
+            let beatPump = beatState.flashDecay * (0.8 + energy * 0.5);
+            targetY += beatPump; // camera jumps up slightly on beat
+            lookY += beatPump * 0.5; // look target also jumps slightly
+            
+            // Ensure camera never goes below the floor
+            targetY = Math.max(0.5, targetY);
             
             if (justCut) {
                 camera.position.set(targetX, targetY, targetZ);
                 autoCamFocus.set(lookX, lookY, lookZ);
                 justCut = false;
             } else {
-                lerpSpeed = 0.08; // moderate tracking speed mostly to follow drift/shake
+                lerpSpeed = 0.08 + (beatState.flashDecay * 0.04); // moderate tracking speed, snaps faster on beat
             }
         } else {
             // Smooth Cinematic Sweeps
@@ -6875,16 +6988,50 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     // Wait, MediaRecorder with a canvas stream drops frames if it cant keep up.
     // So we must use an ImageCapture or WebCodecs. For simplicity in vanilla JS:
     // We will render frames visibly to the main canvas but sized to 4K, 
-    // and store frames via WebCodecs VideoEncoder to an array of chunks!
+    // and stream chunks directly to disk using File System Access API to prevent Out of Memory!
     
-    let encoderChunks = [];
     let encoder;
+    let encoderChunks = [];
+    let fileHandle;
+    let writableStream;
+    let writePromise = Promise.resolve();
+    let useFileStream = false;
+
+    try {
+        if (window.showSaveFilePicker) {
+            fileHandle = await window.showSaveFilePicker({
+                suggestedName: 'lasershow_4k_export.webm',
+                types: [{
+                    description: 'WebM Video',
+                    accept: { 'video/webm': ['.webm'] },
+                }],
+            });
+            writableStream = await fileHandle.createWritable();
+            useFileStream = true;
+        } else {
+            console.warn("showSaveFilePicker not supported. Falling back to RAM. May cause Out of Memory.");
+            alert("Hinweis: Dein Browser unterstützt das direkte Speichern nicht. Das Video wird im Arbeitsspeicher gehalten, was zu einem 'Out of Memory' Fehler führen kann. Bitte nutze Chrome oder Edge.");
+        }
+    } catch (e) {
+        console.warn("User cancelled save prompt", e);
+        ui.style.display = 'none';
+        playing = false;
+        isRecording = false;
+        isOfflineRendering = false;
+        animate();
+        return;
+    }
+
     try {
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
                 chunk.copyTo(buf);
-                encoderChunks.push(buf);
+                if (useFileStream) {
+                    writePromise = writePromise.then(() => writableStream.write(buf));
+                } else {
+                    encoderChunks.push(buf);
+                }
             },
             error: (e) => console.error("VideoEncoder Error", e)
         };
@@ -6967,6 +7114,10 @@ document.getElementById('btn-render').addEventListener('click', async () => {
         stat.innerText = `Finalizing video file...`;
         await encoder.flush();
         encoder.close();
+        if (useFileStream) {
+            await writePromise;
+            await writableStream.close();
+        }
     } catch (e) {
         console.error("4K render loop failed:", e);
         alert("Render fehlgeschlagen. WebCodecs oder Canvas-Export wird nicht vollständig unterstützt.");
@@ -6978,16 +7129,20 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     // but demonstrating the architecture as requested for 'Offline Render').
     // In a fully production system, use 'mp4box.js'.
     
-    const blob = new Blob(encoderChunks, { type: 'video/webm' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `lasershow_4k_export.webm`;
-    document.body.appendChild(a);
-    a.click();
+    if (!useFileStream) {
+        const blob = new Blob(encoderChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lasershow_4k_export.webm`;
+        document.body.appendChild(a);
+        a.click();
+        
+        // Restore
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
     
-    // Restore
-    document.body.removeChild(a);
     renderer.setSize(window.innerWidth, window.innerHeight);
     ui.style.display = 'none';
     playing = false;

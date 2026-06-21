@@ -66,6 +66,11 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
             cg: new Float32Array(config.maxParticles),
             cb: new Float32Array(config.maxParticles),
             alive: new Uint8Array(config.maxParticles),
+            posArray: new Float32Array(config.posBuffer),
+            ageArray: new Float32Array(config.ageBuffer),
+            ltArray: new Float32Array(config.ltBuffer),
+            sizeArray: new Float32Array(config.sizeBuffer),
+            colorArray: new Float32Array(config.colorBuffer),
             _nextSpawnIndex: 0,
             emitAccum: 0,
             burstIntensity: 0
@@ -77,27 +82,12 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
 
         const { dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak } = data;
 
-        // Use transferred buffers — guard against detached buffers (race with dispose)
-        let posArray   = data.posArray;
-        let ageArray   = data.ageArray;
-        let ltArray    = data.ltArray;
-        let sizeArray  = data.sizeArray;
-        let colorArray = data.colorArray;
-
-        const detached =
-            !posArray   || posArray.byteLength   === 0 ||
-            !ageArray   || ageArray.byteLength   === 0 ||
-            !ltArray    || ltArray.byteLength    === 0 ||
-            !sizeArray  || sizeArray.byteLength  === 0 ||
-            !colorArray || colorArray.byteLength === 0;
-
-        if (detached) {
-            posArray   = new Float32Array(sys.maxParticles * 3);
-            ageArray   = new Float32Array(sys.maxParticles);
-            ltArray    = new Float32Array(sys.maxParticles);
-            sizeArray  = new Float32Array(sys.maxParticles);
-            colorArray = new Float32Array(sys.maxParticles * 3);
-        }
+        // SharedArrayBuffer buffers
+        let posArray   = sys.posArray;
+        let ageArray   = sys.ageArray;
+        let ltArray    = sys.ltArray;
+        let sizeArray  = sys.sizeArray;
+        let colorArray = sys.colorArray;
 
         // Burst triggering
         const triggerThreshold = 0.65;
@@ -222,13 +212,8 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
 
         self.postMessage({
             type: 'updated',
-            id,
-            posArray,
-            ageArray,
-            ltArray,
-            sizeArray,
-            colorArray
-        }, [posArray.buffer, ageArray.buffer, ltArray.buffer, sizeArray.buffer, colorArray.buffer]);
+            id
+        });
 
     } else if (type === 'dispose') {
         systems.delete(id);

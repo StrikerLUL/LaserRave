@@ -1,0 +1,129 @@
+18: function createFlareTexture() {
+40: function createGoboTexture() {
+51: function updateGoboCanvas(themeName) {
+126: // ─────────────────────────────────────────────
+128: // ─────────────────────────────────────────────
+167: // ── Instanced Mesh System ──
+186: // ── Timeline & Projection State ──
+198: // ── Pyrotechnik State ──
+204: // ── Section-color + BPM + variation state ────────────────────
+211: // ─────────────────────────────────────────────
+213: // ─────────────────────────────────────────────
+313: // ─── Laser Writer (Vector Projection Scanner) Globals ───────
+455: // ─── Post-Processing (TSL Node-based) ────────
+478: function rebuildPostChain() {
+487: // ─────────────────────────────────────────────
+489: // ─────────────────────────────────────────────
+510: function createTruss(w, h, d, x, y, z, rx=0, ry=0, rz=0) {
+559: function addScreen(w, h, x, y, z, ry=0) {
+568: function buildStageEnvironment() {
+710: // ─────────────────────────────────────────────
+712: // ─────────────────────────────────────────────
+719: function makeParticleMaterial(baseSize, baseOpacity) {
+759: class PyroSystem {
+844: // ─────────────────────────────────────────────
+846: // ─────────────────────────────────────────────
+847: function initPyroSystems() {
+897: // ─────────────────────────────────────────────
+899: // ─────────────────────────────────────────────
+935: function getSharedGeo(id, creator) {
+940: function getSharedMat(id, creator) {
+945: function setupMovingHeadIM(count) {
+1038: function initMovingHeads(count = CFG.movingHeadCount) {
+1670: function setupShaderAttributes(im, count) {
+1696: function updateShaderStaticColors() {
+1718: function updateShaderSectionHues() {
+1738: function setupLaserIM(count) {
+1827: // ─── Formation Presets ────────────────────────────────────────────────────────
+1829: function initLasers(count = CFG.laserCount) {
+1890: function createCrowdMaterials() {
+1960: function initCrowd() {
+2010: function updateCrowdLighting(dt) {
+2114: function initUpLights() {
+2175: function getTextPaths(text) {
+2211: function parseSVGToPaths(svgString) {
+2354: function compileScannerPoints() {
+2415: function initLaserWriter() {
+2498: function updateLaserWriter(dt) {
+2636: function initVolumetricHaze() {
+2741: function createHaze() {
+2768: function initConfetti() {
+2814: function triggerConfettiBurst() {
+2844: function updateConfetti(dt) {
+2893: function createFogTexture() {
+2907: function initFogSimulation() {
+2952: function triggerFogJet(x, y, z, vx, vy, vz) {
+2976: function updateFogParticles(dt) {
+3018: function initLaserSpots(count = CFG.laserCount) {
+3076: function updateLEDCanvas(dt, energy, bass, mid, high, isPeakDrop) {
+3174: function refreshLaserColors() {
+3182: // ─────────────────────────────────────────────
+3184: // ─────────────────────────────────────────────
+3196: function initAudioContext() {
+3212: function getPlaybackTime() {
+3219: function handleBpmTap() {
+3252: function regenerateBeatsFromBPM(bpm) {
+3291: function updatePlaylistUI() {
+3458: // ── BPM-locked beat phase ─────────────────────────────────────
+3459: function getBeatPhase() {
+3473: // ── Analysis progress bar ─────────────────────────────────────
+3474: function setProgress(pct, label) {
+3483: // ── Section hue from spectral character ──────────────────────
+3484: function sectionBaseHue(sec) {
+3493: // ── HSL hue (0–360) → THREE.js hex int ───────────────────────
+3494: function hueToHex(hue, sat = 1.0, lit = 0.58) {
+3511: // ── Pattern from musical character (used ONLY for static song-analysis) ───────
+3514: function pickPattern(bass, mid, high, energy, idx) {
+3546: function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drums, section, isPeakDrop, isSilent) {
+3674: // ── Offline band render helper ─────────────────────────────────
+3710: // ── Per-frame RMS ──────────────────────────────────────────────
+3711: function frameRMS(data, numFrames, hop) {
+3722: function normArr(a) {
+3729: // ── Lissajous seeds from spectral fingerprint ────────────────
+3730: function makeLissajous(seed) {
+3744: // ── Full song analysis ────────────────────────────────────────
+3994: // ── Live lookup helpers ───────────────────────────────────────
+3995: function getSongFrame() {
+4009: function getCurrentSection() {
+4015: // ── Video State ───────────────────────────────────────────────
+4025: // ── Recording State ───────────────────────────────────────────
+4032: // ── Revised loadAudio ─────────────────────────────────────────
+4153: function toggleFullscreen() {
+4256: function toggleRecording() {
+4368: function avgRange(arr, lo, hi) {
+4374: // ─────────────────────────────────────────────
+4376: // ─────────────────────────────────────────────
+4379: function drawViz() {
+4414: // ─────────────────────────────────────────────
+4416: // ─────────────────────────────────────────────
+4582: // ─── Laser Writer VJ UI Event listeners ───────────────────────
+4807: // ── New formation / beam controls ──────────────────────────────
+4889: function switchMode(mode) {
+5007: // ─────────────────────────────────────────────
+5009: // ─────────────────────────────────────────────
+5017: function detectBeat(bass) {
+5027: function detectTransient(high) {
+5035: // ─────────────────────────────────────────────
+5037: // ─────────────────────────────────────────────
+5038: // ─────────────────────────────────────────────
+5040: // ─────────────────────────────────────────────
+5041: function getInterpolatedValue(trackName, time) {
+5066: function updateTimeline() {
+5175: // ─────────────────────────────────────────────
+5177: // ─────────────────────────────────────────────
+5183: function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPeakDrop, isSilent, buildUp, section) {
+5304: // ── Zone-aware choreographic laser pattern engine ─────────────────────────
+5320: function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDrop, isSilent, section, melody, buildUp, skipPattern = false) {
+5779: function animate() {
+6744: // ─────────────────────────────────────────────
+6746: // ─────────────────────────────────────────────
+6770: // ─────────────────────────────────────────────
+6772: // ─────────────────────────────────────────────
+6784: function startDrag(kf, e) {
+6863: // ─────────────────────────────────────────────
+6865: // ─────────────────────────────────────────────
+6915: // ─────────────────────────────────────────────
+6917: // ─────────────────────────────────────────────
+6923: function saveScreenshot() {
+7144: // ─────────────────────────────────────────────
+7146: // ─────────────────────────────────────────────
