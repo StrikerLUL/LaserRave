@@ -167,6 +167,7 @@ const CFG = {
     glacier:  [0x00ffff, 0xffffff, 0x00aaff, 0x88ccff, 0x00ffcc, 0x0055ff],
     hexagon:  [0x00ffcc, 0xff00ff, 0xffff00, 0x00ccff, 0xff00cc, 0xccff00],
     bloodmoon:[0xff0000, 0x8b0000, 0xff4500, 0xdc143c, 0xff8c00, 0xb22222],
+    starlight:[0xffe4e1, 0xffd700, 0x87cefa, 0xff69b4, 0x98fb98, 0xdda0dd],
   }
 };
 
@@ -1068,7 +1069,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight-sweep': 23
 };
 
 const laserUniforms = {
@@ -1336,6 +1337,11 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // starlight-sweep
+          float starSpeed = uTime * 1.2;
+          localPan = sin(starSpeed + aInstanceID * 0.8) * 1.1 * sp;
+          localTilt = uTilt + cos(starSpeed * 1.5 + aInstanceID * 0.5) * 0.4 * sp + uHigh * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -1634,6 +1640,11 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // starlight-sweep
+          float starSpeed = uTime * 1.2;
+          localPan = sin(starSpeed + aInstanceID * 0.8) * 1.1 * sp;
+          localTilt = uTilt + cos(starSpeed * 1.5 + aInstanceID * 0.5) * 0.4 * sp + uHigh * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -3715,6 +3726,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'starlight' && playing && !isSilent) {
+    wanted = 'starlight-sweep';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5824,6 +5837,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'starlight-sweep': {
+                    const starSpeed = tAnim * 1.2;
+                    localPan = Math.sin(starSpeed + i * 0.8) * 1.1 * sp;
+                    localTilt = tiltRad + Math.cos(starSpeed * 1.5 + i * 0.5) * 0.4 * sp + high * 0.2;
                     break;
                 }
                 default: {
