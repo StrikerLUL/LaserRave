@@ -182,7 +182,6 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
-    throw new Error("Force WebGL Fallback to support ShaderMaterial");
     renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
       powerPreference: "high-performance"
@@ -3262,6 +3261,11 @@ function initAudioContext() {
         }),
         createBuffer: (channels, length, sampleRate) => {
             try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const tempCtx = new OfflineCtx(channels, length, sampleRate);
+                    return tempCtx.createBuffer(channels, length, sampleRate);
+                }
                 const TempAudioContext = window.AudioContext || window.webkitAudioContext;
                 if (TempAudioContext) {
                     const tempCtx = new TempAudioContext();
@@ -3304,6 +3308,11 @@ function initAudioContext() {
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
         decodeAudioData: async () => {
             try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                    return tempCtx.createBuffer(1, 44100 * 10, 44100);
+                }
                 const TempAudioContext = window.AudioContext || window.webkitAudioContext;
                 if (TempAudioContext) {
                     const tempCtx = new TempAudioContext();
@@ -4176,7 +4185,22 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    // Wrap decodeAudioData in a custom Promise to handle both Promise and legacy callback signatures
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const decodePromise = audioCtx.decodeAudioData(
+                ab,
+                (decodedData) => resolve(decodedData),
+                (err) => reject(err)
+            );
+            if (decodePromise) {
+                decodePromise.then(resolve).catch(reject);
+            }
+        } catch (e) {
+            reject(e);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4251,13 +4275,19 @@ async function loadAudio(file) {
         try {
             localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
         } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                localAudioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
-                throw e;
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                } else {
+                    throw e;
+                }
             }
         }
 
@@ -4276,13 +4306,19 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         // Attempt one last time to create an AudioBuffer, otherwise use the plain object
         try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
-                throw new Error("No AudioContext");
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                } else {
+                    throw new Error("No AudioContext");
+                }
             }
         } catch (e2) {
              audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -4346,13 +4382,19 @@ async function togglePlay() {
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       try {
-          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-          if (TempAudioContext) {
-              const tempCtx = new TempAudioContext();
-              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-              tempCtx.close().catch(() => {});
+          const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtx) {
+              const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+              audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
           } else {
-              throw new Error("No AudioContext");
+              const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+              if (TempAudioContext) {
+                  const tempCtx = new TempAudioContext();
+                  audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                  tempCtx.close().catch(() => {});
+              } else {
+                  throw new Error("No AudioContext");
+              }
           }
       } catch (e2) {
            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
