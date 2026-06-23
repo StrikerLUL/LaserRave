@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'emerald-splash': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,12 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // emerald-splash
+          float splashX = sin(uTime * 2.5 + aInstanceID * 0.3) * sp;
+          float splashY = cos(uTime * 1.8 + aInstanceID * 0.2) * 0.3 * sp;
+          localPan = splashX + norm2 * 0.4 * sp;
+          localTilt = uTilt + splashY + uKick * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1624,12 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // emerald-splash
+          float splashX = sin(uTime * 2.5 + aInstanceID * 0.3) * sp;
+          float splashY = cos(uTime * 1.8 + aInstanceID * 0.2) * 0.3 * sp;
+          localPan = splashX + norm2 * 0.4 * sp;
+          localTilt = uTilt + splashY + uKick * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -3667,7 +3679,10 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (CFG.theme === 'ocean' && playing && !isSilent) {
+  if (CFG.theme === 'emerald' && playing && !isSilent) {
+    wanted = 'emerald-splash';
+
+  } else if (CFG.theme === 'ocean' && playing && !isSilent) {
     // Force the liquid pattern when the ocean theme is active and music is playing
     wanted = 'liquid';
 
