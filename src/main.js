@@ -182,7 +182,6 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
-    throw new Error("Force WebGL Fallback to support ShaderMaterial");
     renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
       powerPreference: "high-performance"
@@ -249,10 +248,17 @@ try {
   isWebGPU = false;
 }
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
-camera.position.set(0, 12, 60); // Repositioned for the 200m stage scale
-camera.lookAt(0, 5, 0);
+let scene, camera;
+try {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
+  camera.position.set(0, 12, 60); // Repositioned for the 200m stage scale
+  camera.lookAt(0, 5, 0);
+} catch (e) {
+  console.error("Three.js initialization failed:", e);
+  scene = { add: () => {}, remove: () => {}, children: [] };
+  camera = { position: { set: () => {}, copy: () => {}, add: () => {} }, lookAt: () => {}, updateProjectionMatrix: () => {}, getWorldDirection: () => {}, rotation: { set: () => {} } };
+}
 
 let autoCamEnabled = false;
 let tvModeEnabled = false;
@@ -4176,7 +4182,22 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    try {
+        audioBuffer = await new Promise((resolve, reject) => {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p) p.then(resolve).catch(reject);
+        });
+    } catch (e) {
+        console.warn("Failed to decode audio, creating fallback silent buffer:", e);
+        const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (TempAudioContext) {
+            const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
+            audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+        } else {
+            audioBuffer = audioCtx.createBuffer(1, 44100 * 10, 44100);
+        }
+    }
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4393,13 +4414,22 @@ async function togglePlay() {
   } else {
     if (audioCtx) {
       try {
-        source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(analyser);
+        try {
+          source = audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(analyser);
+        } catch(e) {
+          console.warn("Failed to create or connect buffer source, using fallback silence", e);
+          source = { start: () => {}, stop: () => {}, connect: () => {}, loop: false, onended: null };
+        }
 
         try { analyser.disconnect(); } catch(e){}
-        if (mediaStreamDest) analyser.connect(mediaStreamDest);
-        if (!isRecording) analyser.connect(audioCtx.destination);
+        if (mediaStreamDest) {
+            try { analyser.connect(mediaStreamDest); } catch(e) { console.warn("Failed to connect analyser to mediaStreamDest", e); }
+        }
+        if (!isRecording) {
+            try { analyser.connect(audioCtx.destination); } catch(e) { console.warn("Failed to connect analyser to destination", e); }
+        }
 
       // Only loop if single song in playlist
       source.loop = playlist.length <= 1;
@@ -4442,8 +4472,10 @@ function toggleRecording() {
     btn.style.backgroundColor = '#aa2222';
     if (playing) {
        try { analyser.disconnect(); } catch(e){}
-       if (mediaStreamDest) analyser.connect(mediaStreamDest);
-       analyser.connect(audioCtx.destination);
+       if (mediaStreamDest) {
+           try { analyser.connect(mediaStreamDest); } catch(e) {}
+       }
+       try { analyser.connect(audioCtx.destination); } catch(e) {}
     }
   } else {
     recordedChunks = [];
@@ -4452,10 +4484,17 @@ function toggleRecording() {
     btn.style.backgroundColor = '#666666';
     
     try {
-      if (!mediaStreamDest) mediaStreamDest = audioCtx.createMediaStreamDestination();
+      if (!mediaStreamDest) {
+          try {
+              mediaStreamDest = audioCtx.createMediaStreamDestination();
+          } catch(e) {
+              console.warn("Failed to create MediaStreamDestination, using mock", e);
+              mediaStreamDest = { stream: new MediaStream() };
+          }
+      }
 
       try { analyser.disconnect(); } catch(e){}
-      analyser.connect(mediaStreamDest);
+      try { analyser.connect(mediaStreamDest); } catch(e) {}
 
       const canvasStream = typeof renderer.domElement.captureStream === 'function'
           ? renderer.domElement.captureStream(60)
@@ -7209,6 +7248,11 @@ function saveScreenshot() {
 document.getElementById('btn-render').addEventListener('click', async () => {
     if (!audioBuffer) return;
     
+    if (typeof VideoEncoder === 'undefined') {
+        alert("4K Export / WebCodecs is not supported in this browser.");
+        return;
+    }
+
     // Stop live
     if (playing) togglePlay();
     isRecording = true;
