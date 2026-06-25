@@ -4176,7 +4176,12 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+      const p = audioCtx.decodeAudioData(ab, resolve, reject);
+      if (p && typeof p.then === 'function') {
+        p.then(resolve).catch(reject);
+      }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4191,6 +4196,7 @@ async function loadAudio(file) {
       beats: [{ time: 0, strength: 1.0 }],
       sections: [{
         startFrame: 0, endFrame: N, startTime: 0, endTime: audioBuffer.duration || 10,
+        start: 0, end: audioBuffer.duration || 10, intensity: 1, type: "drop",
         avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
         bassW: 0.33, midW: 0.33, trebleW: 0.33,
         seed: 0, id: 0,
@@ -4267,8 +4273,8 @@ async function loadAudio(file) {
         songMap = {
             bpm: 120,
             beats: [{ time: 0, strength: 1 }],
-            sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-            bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
+            sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, start: 0, end: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
+            bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100), melodyMap: new Float32Array(100), buildUpMap: new Float32Array(100),
             hopSec: 0.1, N: 100
         };
         waveformValid = false;
