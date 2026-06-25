@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'cyber-spider': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,13 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-spider
+          float legs = 8.0;
+          float basePhase = uTime * 2.5 + norm2 * legs * 3.14159265;
+          float twitch = sin(basePhase) * cos(uTime * 7.0 + aInstanceID);
+          localPan = twitch * sp * 1.2 + sin(uTime * 0.5) * sp * 0.5;
+          localTilt = uTilt + cos(basePhase) * 0.4 * (1.0 + uBass) + sin(uTime * 1.2) * 0.1;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1625,13 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-spider
+          float legs = 8.0;
+          float basePhase = uTime * 2.5 + norm2 * legs * 3.14159265;
+          float twitch = sin(basePhase) * cos(uTime * 7.0 + aInstanceID);
+          localPan = twitch * sp * 1.2 + sin(uTime * 0.5) * sp * 0.5;
+          localTilt = uTilt + cos(basePhase) * 0.4 * (1.0 + uBass) + sin(uTime * 1.2) * 0.1;
       }
       else {
           localTilt = uTilt;
@@ -3667,7 +3681,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (CFG.theme === 'ocean' && playing && !isSilent) {
+  if (CFG.theme === 'cyber_spider' && playing && !isSilent) {
+    wanted = 'cyber-spider';
+  } else if (CFG.theme === 'ocean' && playing && !isSilent) {
     // Force the liquid pattern when the ocean theme is active and music is playing
     wanted = 'liquid';
 
@@ -5844,6 +5860,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'cyber-spider': {
+                    const legs = 8.0;
+                    const basePhase = tAnim * 2.5 + norm2 * legs * Math.PI;
+                    const twitch = Math.sin(basePhase) * Math.cos(tAnim * 7.0 + i);
+                    localPan = twitch * sp * 1.2 + Math.sin(tAnim * 0.5) * sp * 0.5;
+                    localTilt = tiltRad + Math.cos(basePhase) * 0.4 * (1.0 + bass) + Math.sin(tAnim * 1.2) * 0.1;
                     break;
                 }
                 default: {
