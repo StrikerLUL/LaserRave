@@ -3312,7 +3312,15 @@ function initAudioContext() {
                     return buf;
                 }
             } catch (e) {
-                // fall through
+                try {
+                    const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                    if (OfflineCtxConstructor) {
+                        const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                        return offlineCtx.createBuffer(1, 44100 * 10, 44100);
+                    }
+                } catch (e2) {
+                    // fall through
+                }
             }
             return {
                 duration: 10,
@@ -4176,7 +4184,14 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p) p.then(resolve).catch(reject);
+        } catch (e) {
+            reject(e);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4285,7 +4300,17 @@ async function loadAudio(file) {
                 throw new Error("No AudioContext");
             }
         } catch (e2) {
-             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+            try {
+                const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtxConstructor) {
+                    const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                    audioBuffer = offlineCtx.createBuffer(1, 44100 * 10, 44100);
+                } else {
+                    throw new Error("No OfflineAudioContext");
+                }
+            } catch (e3) {
+                audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+            }
         }
 
         songMap = {
@@ -4355,7 +4380,17 @@ async function togglePlay() {
               throw new Error("No AudioContext");
           }
       } catch (e2) {
-           audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+          try {
+              const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+              if (OfflineCtxConstructor) {
+                  const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                  audioBuffer = offlineCtx.createBuffer(1, 44100 * 10, 44100);
+              } else {
+                  throw new Error("No OfflineAudioContext");
+              }
+          } catch (e3) {
+              audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+          }
       }
 
       songMap = {
@@ -6897,10 +6932,18 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try {
+              renderer.render(scene, camera);
+          } catch(err) {
+              console.warn('WebGL render fallback failed in postProcessing catch:', err);
+          }
       }
   } else {
-      renderer.render(scene, camera);
+      try {
+          renderer.render(scene, camera);
+      } catch(err) {
+          console.warn('Renderer.render failed:', err);
+      }
   }
 
   if (needsScreenshot) {
