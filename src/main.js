@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'quantum-jump': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,13 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // quantum-jump
+          float jumpTime = floor(uTime * 4.0 + wn * 2.0);
+          float randPan = fract(sin(jumpTime * 12.9898 + aInstanceID * 78.233) * 43758.5453) * 2.0 - 1.0;
+          float randTilt = fract(sin(jumpTime * 93.989 + aInstanceID * 67.345) * 43758.5453) * 2.0 - 1.0;
+          localPan = randPan * 0.6 * sp;
+          localTilt = uTilt + randTilt * 0.3 * sp + uKick * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1625,13 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // quantum-jump
+          float jumpTime = floor(uTime * 4.0 + wn * 2.0);
+          float randPan = fract(sin(jumpTime * 12.9898 + aInstanceID * 78.233) * 43758.5453) * 2.0 - 1.0;
+          float randTilt = fract(sin(jumpTime * 93.989 + aInstanceID * 67.345) * 43758.5453) * 2.0 - 1.0;
+          localPan = randPan * 0.6 * sp;
+          localTilt = uTilt + randTilt * 0.3 * sp + uKick * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -3697,6 +3711,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'phantom';
   } else if (CFG.theme === 'quasar' && playing && !isSilent) {
     wanted = 'quasar-spin';
+  } else if (CFG.theme === 'quantum' && playing && !isSilent) {
+    wanted = 'quantum-jump';
   } else if (CFG.theme === 'glacier' && playing && !isSilent) {
     wanted = 'glacier';
   } else if (CFG.theme === 'hexagon' && playing && !isSilent) {
@@ -5844,6 +5860,16 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'quantum-jump': {
+                    const jumpTime = Math.floor(tAnim * 4.0 + wn * 2.0);
+                    const seed1 = jumpTime * 12.9898 + i * 78.233;
+                    const randPan = ((Math.sin(seed1) * 43758.5453) - Math.floor(Math.sin(seed1) * 43758.5453)) * 2.0 - 1.0;
+                    const seed2 = jumpTime * 93.989 + i * 67.345;
+                    const randTilt = ((Math.sin(seed2) * 43758.5453) - Math.floor(Math.sin(seed2) * 43758.5453)) * 2.0 - 1.0;
+                    localPan = randPan * 0.6 * sp;
+                    localTilt = tiltRad + randTilt * 0.3 * sp + kick * 0.2;
                     break;
                 }
                 default: {
