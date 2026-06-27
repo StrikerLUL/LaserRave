@@ -3302,25 +3302,33 @@ function initAudioContext() {
         resume: async () => {},
         state: 'running',
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
-        decodeAudioData: async () => {
-            try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-                if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
-                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                    tempCtx.close().catch(() => {});
-                    return buf;
+        decodeAudioData: (buffer, successCallback, errorCallback) => {
+            return new Promise((resolve, reject) => {
+                const done = (buf) => {
+                    if (successCallback) successCallback(buf);
+                    resolve(buf);
+                };
+                try {
+                    const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (TempAudioContext) {
+                        const tempCtx = new TempAudioContext();
+                        const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                        tempCtx.close().catch(() => {});
+                        done(buf);
+                        return;
+                    }
+                } catch (e) {
+                    // fall through
                 }
-            } catch (e) {
-                // fall through
-            }
-            return {
-                duration: 10,
-                sampleRate: 44100,
-                length: 441000,
-                numberOfChannels: 1,
-                getChannelData: () => new Float32Array(441000)
-            };
+                const mockBuf = {
+                    duration: 10,
+                    sampleRate: 44100,
+                    length: 441000,
+                    numberOfChannels: 1,
+                    getChannelData: () => new Float32Array(441000)
+                };
+                done(mockBuf);
+            });
         }
     };
     analyser = audioCtx.createAnalyser();
@@ -4176,7 +4184,17 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const decodePromise = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (decodePromise) {
+                decodePromise.then(resolve).catch(reject);
+            }
+        } catch (e) {
+            reject(e);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4386,10 +4404,14 @@ async function togglePlay() {
   }
   if (playing) {
     playbackStartOffset = getPlaybackTime(); // save position
-    if (source) source.stop();
+    if (source) {
+      try { source.stop(); } catch(e){}
+    }
     playing = false;
     document.getElementById('btn-play-pause').textContent = 'Play';
-    if (videoObj) videoObj.pause();
+    if (videoObj) {
+      try { videoObj.pause(); } catch(e){}
+    }
   } else {
     if (audioCtx) {
       try {
@@ -6897,10 +6919,18 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try {
+              renderer.render(scene, camera);
+          } catch(err) {
+              console.warn("Renderer render failed in fallback", err);
+          }
       }
   } else {
-      renderer.render(scene, camera);
+      try {
+          renderer.render(scene, camera);
+      } catch(err) {
+          console.warn("Renderer render failed", err);
+      }
   }
 
   if (needsScreenshot) {
@@ -7274,6 +7304,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder API is not supported in this environment.");
+        }
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
