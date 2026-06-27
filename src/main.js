@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'cyber-pulse': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,12 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-pulse
+          float pulseSpeed = uTime * 2.5;
+          float pulseRadius = 0.5 * sp * (1.0 + uKick * 0.8);
+          localPan = sin(pulseSpeed + aInstanceID * 0.3) * pulseRadius + norm2 * 0.4 * sp;
+          localTilt = uTilt + cos(pulseSpeed * 0.6 + lyp) * pulseRadius + uBass * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1624,12 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-pulse
+          float pulseSpeed = uTime * 2.5;
+          float pulseRadius = 0.5 * sp * (1.0 + uKick * 0.8);
+          localPan = sin(pulseSpeed + aInstanceID * 0.3) * pulseRadius + norm2 * 0.4 * sp;
+          localTilt = uTilt + cos(pulseSpeed * 0.6 + lyp) * pulseRadius + uBass * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -3703,6 +3715,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'cyberpulse' && playing && !isSilent) {
+    wanted = 'cyber-pulse';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5844,6 +5858,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'cyber-pulse': {
+                    const pulseSpeed = tAnim * 2.5;
+                    const pulseRadius = 0.5 * sp * (1.0 + kick * 0.8);
+                    localPan = Math.sin(pulseSpeed + i * 0.3) * pulseRadius + norm2 * 0.4 * sp;
+                    localTilt = tiltRad + Math.cos(pulseSpeed * 0.6 + lyp) * pulseRadius + bass * 0.4;
                     break;
                 }
                 default: {
