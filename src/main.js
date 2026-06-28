@@ -242,6 +242,8 @@ try {
     toneMapping: THREE.NoToneMapping,
     init: async () => {},
     clear: () => {},
+    add: () => {},
+    remove: () => {},
     domElement: Object.assign(document.createElement('canvas'), {
         captureStream: () => new MediaStream()
     })
@@ -3809,7 +3811,7 @@ async function renderBand(buf, loHz, hiHz) {
     const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OfflineCtxConstructor) {
       console.warn("OfflineAudioContext not supported, using fallback band array.");
-      return new Float32Array(buf.length || 441000);
+      return new Float32Array(buf ? buf.length : 441000);
     }
 
     const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
@@ -4176,7 +4178,10 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+      const p = audioCtx.decodeAudioData(ab, resolve, reject);
+      if (p) p.then(resolve).catch(reject);
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4285,7 +4290,13 @@ async function loadAudio(file) {
                 throw new Error("No AudioContext");
             }
         } catch (e2) {
-             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+             const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+             if (OfflineCtxConstructor) {
+                 const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                 audioBuffer = offlineCtx.createBuffer(1, 44100 * 10, 44100);
+             } else {
+                 audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+             }
         }
 
         songMap = {
@@ -6967,6 +6978,8 @@ async function initRenderer() {
                 toneMapping: THREE.NoToneMapping,
                 init: async () => {},
                 clear: () => {},
+                add: () => {},
+                remove: () => {},
                 domElement: Object.assign(document.createElement('canvas'), {
                     captureStream: () => new MediaStream()
                 })
