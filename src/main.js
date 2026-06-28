@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'nebula-drift': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,11 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // nebula-drift
+          float driftT = uTime * 0.3;
+          localPan = norm2 * 0.8 * sp + sin(driftT * 2.0 + aInstanceID * 0.5) * 0.3 * sp;
+          localTilt = uTilt + cos(driftT * 1.5 + lyp) * 0.3 * sp + sin(driftT * 3.0 + norm2 * 3.14159) * 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1623,11 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // nebula-drift
+          float driftT = uTime * 0.3;
+          localPan = norm2 * 0.8 * sp + sin(driftT * 2.0 + aInstanceID * 0.5) * 0.3 * sp;
+          localTilt = uTilt + cos(driftT * 1.5 + lyp) * 0.3 * sp + sin(driftT * 3.0 + norm2 * 3.14159) * 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -3703,6 +3713,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'nebula' && playing && !isSilent) {
+    wanted = 'nebula-drift';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5844,6 +5856,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'nebula-drift': {
+                    const driftT = tAnim * 0.3;
+                    localPan = norm2 * 0.8 * sp + Math.sin(driftT * 2.0 + i * 0.5) * 0.3 * sp;
+                    localTilt = tiltRad + Math.cos(driftT * 1.5 + lyp) * 0.3 * sp + Math.sin(driftT * 3.0 + norm2 * Math.PI) * 0.1 * sp;
                     break;
                 }
                 default: {
