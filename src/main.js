@@ -4174,9 +4174,27 @@ async function loadAudio(file) {
     if (playing && source) { source.stop(); playing = false; }
     playbackStartOffset = 0;
 
-    const ab = await file.arrayBuffer();
+    let ab;
+    try {
+      ab = await file.arrayBuffer();
+    } catch (e) {
+      console.warn("Failed to read file as array buffer, creating empty buffer fallback", e);
+      ab = new ArrayBuffer(0);
+    }
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    try {
+      audioBuffer = await new Promise((resolve, reject) => {
+        try {
+          const p = audioCtx.decodeAudioData(ab, resolve, reject);
+          if (p) p.then(resolve).catch(reject);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    } catch (e) {
+      console.warn("Failed to decode audio, using fallback", e);
+      audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+    }
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -6897,10 +6915,10 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try { renderer.render(scene, camera); } catch (e) { console.warn("Fallback render failed:", e); renderer.setAnimationLoop(null); }
       }
   } else {
-      renderer.render(scene, camera);
+      try { renderer.render(scene, camera); } catch (e) { console.warn("Render failed:", e); renderer.setAnimationLoop(null); }
   }
 
   if (needsScreenshot) {
