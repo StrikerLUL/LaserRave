@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'cyber-glitch': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,13 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-glitch
+          float t = uTime * lxf * 2.0 + lxp;
+          float glitch = fract(sin(dot(vec2(uTime, wn), vec2(12.9898, 78.233))) * 43758.5453) > 0.95 ? 0.5 : 0.0;
+          float stepTime = floor(t * 4.0) / 4.0;
+          localPan = sin(stepTime + wn * 3.14159265 * 2.0) * 0.8 * sp + (glitch * (fract(t * 13.0) - 0.5) * sp * uEnergy * 2.0);
+          localTilt = uTilt + cos(stepTime * 0.5) * 0.2 * sp + (glitch * (fract(t * 17.0) - 0.5) * sp * uEnergy * 2.0);
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1625,13 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-glitch
+          float t = uTime * lxf * 2.0 + lxp;
+          float glitch = fract(sin(dot(vec2(uTime, wn), vec2(12.9898, 78.233))) * 43758.5453) > 0.95 ? 0.5 : 0.0;
+          float stepTime = floor(t * 4.0) / 4.0;
+          localPan = sin(stepTime + wn * 3.14159265 * 2.0) * 0.8 * sp + (glitch * (fract(t * 13.0) - 0.5) * sp * uEnergy * 2.0);
+          localTilt = uTilt + cos(stepTime * 0.5) * 0.2 * sp + (glitch * (fract(t * 17.0) - 0.5) * sp * uEnergy * 2.0);
       }
       else {
           localTilt = uTilt;
@@ -3683,6 +3697,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'toxic-spill';
+
+  } else if (CFG.theme === 'cyberglitch' && playing && !isSilent) {
+    wanted = 'cyber-glitch';
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
@@ -5844,6 +5861,27 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'cyber-glitch': {
+                    const t = tAnim * lxf * 2.0 + lxp;
+
+                    // Simple CPU seeded pseudo-random for glitch condition
+                    const dotProd = tAnim * 12.9898 + wn * 78.233;
+                    const pseudoRand = Math.sin(dotProd) * 43758.5453;
+                    const glitchRandom = pseudoRand - Math.floor(pseudoRand);
+
+                    const glitch = glitchRandom > 0.95 ? 0.5 : 0.0;
+                    const stepTime = Math.floor(t * 4.0) / 4.0;
+
+                    const f13 = t * 13.0;
+                    const fract13 = f13 - Math.floor(f13);
+
+                    const f17 = t * 17.0;
+                    const fract17 = f17 - Math.floor(f17);
+
+                    localPan = Math.sin(stepTime + wn * Math.PI * 2.0) * 0.8 * sp + (glitch * (fract13 - 0.5) * sp * energy * 2.0);
+                    localTilt = tiltRad + Math.cos(stepTime * 0.5) * 0.2 * sp + (glitch * (fract17 - 0.5) * sp * energy * 2.0);
                     break;
                 }
                 default: {
