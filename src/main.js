@@ -4176,7 +4176,18 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    // Custom Promise to handle both legacy callback and standard Promise returns for decodeAudioData
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const decodePromise = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (decodePromise) {
+                decodePromise.then(resolve).catch(reject);
+            }
+        } catch (e) {
+            reject(e);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4251,11 +4262,10 @@ async function loadAudio(file) {
         try {
             localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
         } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
             if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+                const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
+                localAudioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
                 throw e;
             }
@@ -6897,10 +6907,18 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try {
+              renderer.render(scene, camera);
+          } catch(err) {
+              console.warn('Fallback WebGL render failed', err);
+          }
       }
   } else {
-      renderer.render(scene, camera);
+      try {
+          renderer.render(scene, camera);
+      } catch(err) {
+          console.warn('Render failed', err);
+      }
   }
 
   if (needsScreenshot) {
@@ -7247,6 +7265,16 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     let writableStream;
     let writePromise = Promise.resolve();
     let useFileStream = false;
+
+    if (typeof VideoEncoder === 'undefined') {
+        alert("4K Export / WebCodecs is not supported in this browser.");
+        ui.style.display = 'none';
+        playing = false;
+        isRecording = false;
+        isOfflineRendering = false;
+        try { animate(); } catch(e){}
+        return;
+    }
 
     try {
         if (window.showSaveFilePicker) {
