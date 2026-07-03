@@ -3314,6 +3314,17 @@ function initAudioContext() {
             } catch (e) {
                 // fall through
             }
+
+            try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const ctx = new OfflineCtx(1, 44100 * 10, 44100);
+                    return ctx.createBuffer(1, 44100 * 10, 44100);
+                }
+            } catch(e) {
+                console.warn("Could not create fallback AudioBuffer in decodeAudioData mock", e);
+            }
+
             return {
                 duration: 10,
                 sampleRate: 44100,
@@ -4167,6 +4178,25 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let mediaStreamDest = null;
 
+
+// Funktion, um decodeAudioData sicher aufzurufen (kompatibel mit Callback & Promise)
+function safeDecodeAudioData(audioCtx, arrayBuffer) {
+    return new Promise((resolve, reject) => {
+        try {
+            const promise = audioCtx.decodeAudioData(
+                arrayBuffer,
+                (decoded) => resolve(decoded),
+                (err) => reject(err)
+            );
+            if (promise && typeof promise.then === 'function') {
+                promise.then(resolve).catch(reject);
+            }
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
 // ── Revised loadAudio ─────────────────────────────────────────
 async function loadAudio(file) {
   try {
@@ -4176,7 +4206,7 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await safeDecodeAudioData(audioCtx, ab);
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4285,7 +4315,18 @@ async function loadAudio(file) {
                 throw new Error("No AudioContext");
             }
         } catch (e2) {
-             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+            try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const ctx = new OfflineCtx(1, 44100 * 10, 44100);
+                    audioBuffer = ctx.createBuffer(1, 44100 * 10, 44100);
+                } else {
+                    throw new Error("No OfflineAudioContext");
+                }
+            } catch(e3) {
+                console.warn("Fallback to plain JS object AudioBuffer", e3);
+                audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+            }
         }
 
         songMap = {
@@ -6897,10 +6938,18 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try {
+              renderer.render(scene, camera);
+          } catch(e2) {
+              console.error('Fallback render failed:', e2);
+          }
       }
   } else {
-      renderer.render(scene, camera);
+      try {
+          renderer.render(scene, camera);
+      } catch(e) {
+          console.error("Renderer failed during animate:", e);
+      }
   }
 
   if (needsScreenshot) {
