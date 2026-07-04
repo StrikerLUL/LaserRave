@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'spiral-galaxy': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,12 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // spiral-galaxy
+          float angle = uTime * 1.5 + wn * 6.28318;
+          float radius = 0.5 * sp * (1.0 + uKick * 0.3);
+          localPan = cos(angle) * radius;
+          localTilt = uTilt + sin(angle) * radius + (norm2 * 0.2);
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1624,12 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // spiral-galaxy
+          float angle = uTime * 1.5 + wn * 6.28318;
+          float radius = 0.5 * sp * (1.0 + uKick * 0.3);
+          localPan = cos(angle) * radius;
+          localTilt = uTilt + sin(angle) * radius + (norm2 * 0.2);
       }
       else {
           localTilt = uTilt;
@@ -3705,6 +3717,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'blood-sweep';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
+  } else if (CFG.theme === 'galaxy' && playing && !isSilent) {
+    wanted = 'spiral-galaxy';
 
   } else if (CFG.theme === 'inferno' && playing && !isSilent) {
     wanted = 'flame';
@@ -5844,6 +5858,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'spiral-galaxy': {
+                    const angle = tAnim * 1.5 + wn * Math.PI * 2;
+                    const radius = 0.5 * sp * (1.0 + kick * 0.3);
+                    localPan = Math.cos(angle) * radius;
+                    localTilt = tiltRad + Math.sin(angle) * radius + (norm2 * 0.2);
                     break;
                 }
                 default: {
