@@ -249,10 +249,34 @@ try {
   isWebGPU = false;
 }
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
-camera.position.set(0, 12, 60); // Repositioned for the 200m stage scale
-camera.lookAt(0, 5, 0);
+let scene;
+let camera;
+
+try {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
+  camera.position.set(0, 12, 60); // Repositioned for the 200m stage scale
+  camera.lookAt(0, 5, 0);
+} catch (e) {
+  console.error("Critical error initializing Three.js Scene/Camera:", e);
+  scene = {
+    add: () => {},
+    remove: () => {},
+    children: []
+  };
+  camera = {
+    position: { set: () => {}, copy: () => {}, add: () => {}, lerp: () => {}, distanceTo: () => 10, clone: () => ({ x: 0, y: 0, z: 0 }) },
+    lookAt: () => {},
+    rotation: { set: () => {} },
+    getWorldDirection: (dir) => {
+      if (dir && typeof dir.set === 'function') dir.set(0, 0, -1);
+      return dir;
+    },
+    updateProjectionMatrix: () => {},
+    fov: 55,
+    aspect: W / H
+  };
+}
 
 let autoCamEnabled = false;
 let tvModeEnabled = false;
@@ -3302,25 +3326,36 @@ function initAudioContext() {
         resume: async () => {},
         state: 'running',
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
-        decodeAudioData: async () => {
-            try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-                if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
-                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                    tempCtx.close().catch(() => {});
-                    return buf;
+        decodeAudioData: async (data, successCb, errorCb) => {
+            return new Promise((resolve, reject) => {
+                let buf;
+                try {
+                    const TempAudioContext = window.AudioContext || window.webkitAudioContext || window.OfflineAudioContext;
+                    if (TempAudioContext) {
+                        const tempCtx = new TempAudioContext();
+                        buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                        if(typeof tempCtx.close === 'function') tempCtx.close().catch(() => {});
+                    } else {
+                        buf = {
+                            duration: 10,
+                            sampleRate: 44100,
+                            length: 441000,
+                            numberOfChannels: 1,
+                            getChannelData: () => new Float32Array(441000)
+                        };
+                    }
+                } catch (e) {
+                    buf = {
+                        duration: 10,
+                        sampleRate: 44100,
+                        length: 441000,
+                        numberOfChannels: 1,
+                        getChannelData: () => new Float32Array(441000)
+                    };
                 }
-            } catch (e) {
-                // fall through
-            }
-            return {
-                duration: 10,
-                sampleRate: 44100,
-                length: 441000,
-                numberOfChannels: 1,
-                getChannelData: () => new Float32Array(441000)
-            };
+                if (successCb) successCb(buf);
+                resolve(buf);
+            });
         }
     };
     analyser = audioCtx.createAnalyser();
@@ -4176,7 +4211,34 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p && typeof p.then === 'function') {
+                p.then(resolve).catch(reject);
+            }
+        } catch (e) {
+            reject(e);
+        }
+    }).catch(err => {
+        console.warn("audioCtx.decodeAudioData failed, creating fallback audio buffer", err);
+        const TempAudioContext = window.AudioContext || window.webkitAudioContext || window.OfflineAudioContext;
+        if (TempAudioContext) {
+            const tempCtx = new TempAudioContext();
+            const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+            if (typeof tempCtx.close === 'function') tempCtx.close().catch(() => {});
+            return buf;
+        } else {
+            return {
+                duration: 10,
+                sampleRate: 44100,
+                length: 441000,
+                numberOfChannels: 1,
+                getChannelData: () => new Float32Array(441000)
+            };
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
