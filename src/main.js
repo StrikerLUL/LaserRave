@@ -239,7 +239,7 @@ try {
     },
     setSize: () => {},
     setPixelRatio: () => {},
-    toneMapping: THREE.NoToneMapping,
+    toneMapping: 0,
     init: async () => {},
     clear: () => {},
     domElement: Object.assign(document.createElement('canvas'), {
@@ -3262,6 +3262,15 @@ function initAudioContext() {
         }),
         createBuffer: (channels, length, sampleRate) => {
             try {
+                const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext(channels, length, sampleRate);
+                    return tempCtx.createBuffer(channels, length, sampleRate);
+                }
+            } catch (e) {
+                // fall through
+            }
+            try {
                 const TempAudioContext = window.AudioContext || window.webkitAudioContext;
                 if (TempAudioContext) {
                     const tempCtx = new TempAudioContext();
@@ -3303,6 +3312,15 @@ function initAudioContext() {
         state: 'running',
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
         decodeAudioData: async () => {
+            try {
+                const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
+                    return tempCtx.createBuffer(1, 44100 * 10, 44100);
+                }
+            } catch (e) {
+                // fall through
+            }
             try {
                 const TempAudioContext = window.AudioContext || window.webkitAudioContext;
                 if (TempAudioContext) {
@@ -4176,7 +4194,16 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    // Wrap decodeAudioData to handle both callback and promise-based signatures
+    audioBuffer = await new Promise((resolve, reject) => {
+      try {
+        const promise = audioCtx.decodeAudioData(ab, resolve, reject);
+        if (promise) promise.then(resolve).catch(reject);
+      } catch (e) {
+        reject(e);
+      }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4346,13 +4373,19 @@ async function togglePlay() {
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       try {
-          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-          if (TempAudioContext) {
-              const tempCtx = new TempAudioContext();
-              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-              tempCtx.close().catch(() => {});
+          const TempOfflineAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (TempOfflineAudioContext) {
+              const tempCtx = new TempOfflineAudioContext(1, 44100 * 10, 44100);
+              audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
           } else {
-              throw new Error("No AudioContext");
+              const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+              if (TempAudioContext) {
+                  const tempCtx = new TempAudioContext();
+                  audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                  tempCtx.close().catch(() => {});
+              } else {
+                  throw new Error("No AudioContext");
+              }
           }
       } catch (e2) {
            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -6964,7 +6997,7 @@ async function initRenderer() {
                 },
                 setSize: () => {},
                 setPixelRatio: () => {},
-                toneMapping: THREE.NoToneMapping,
+                toneMapping: 0,
                 init: async () => {},
                 clear: () => {},
                 domElement: Object.assign(document.createElement('canvas'), {
