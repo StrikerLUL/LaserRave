@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'cyber-matrix': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,12 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-matrix
+          float matrixSpeed = uTime * 3.0;
+          float stepPan = floor(wn * 10.0) / 10.0;
+          localPan = (stepPan * 2.0 - 1.0) * sp * 0.8 + sin(matrixSpeed + wn * 3.1415) * 0.1;
+          localTilt = uTilt + (uTime * 5.0 + wn * 10.0 - floor(uTime * 5.0 + wn * 10.0)) * 0.4 * sp;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1624,12 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-matrix
+          float matrixSpeed = uTime * 3.0;
+          float stepPan = floor(wn * 10.0) / 10.0;
+          localPan = (stepPan * 2.0 - 1.0) * sp * 0.8 + sin(matrixSpeed + wn * 3.1415) * 0.1;
+          localTilt = uTilt + (uTime * 5.0 + wn * 10.0 - floor(uTime * 5.0 + wn * 10.0)) * 0.4 * sp;
       }
       else {
           localTilt = uTilt;
@@ -3686,6 +3698,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
+
+  } else if (CFG.theme === 'cyber_matrix' && playing && !isSilent) {
+    wanted = 'cyber-matrix';
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
@@ -5844,6 +5859,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'cyber-matrix': {
+                    const matrixSpeed = tAnim * 3.0;
+                    const stepPan = Math.floor(wn * 10.0) / 10.0;
+                    localPan = (stepPan * 2.0 - 1.0) * sp * 0.8 + Math.sin(matrixSpeed + wn * Math.PI) * 0.1;
+                    const fractPart = (tAnim * 5.0 + wn * 10.0) - Math.floor(tAnim * 5.0 + wn * 10.0);
+                    localTilt = tiltRad + fractPart * 0.4 * sp;
                     break;
                 }
                 default: {

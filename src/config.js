@@ -18,6 +18,8 @@ export const CFG = {
   screenBrightness: 1.0,
   screenReactivity: 1.0,
   themes: {
+    cyber_matrix: [0x00ffcc, 0xff00ff, 0x00ffff, 0x33ff00, 0xcc00ff, 0x00ff88],
+
     dynamic:  [0xffffff], // Will be overridden in animation loop
     rgb:      [0xff2222, 0x22ff44, 0x2244ff, 0xffff00, 0xff00ff, 0x00ffff],
     cyberpunk:[0xff00ff, 0x00ffff, 0xaa00ff, 0xff0088, 0x00ffaa, 0xffaa00],
