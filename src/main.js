@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'hologram': 23
 };
 
 const laserUniforms = {
@@ -1320,6 +1320,14 @@ const laserVertexShader = `
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
+      else if (uPattern == 23) { // hologram
+          float glitchSpeed = uTime * 4.0;
+          float glitchX = (fract(sin(aInstanceID * 12.9898 + uTime) * 43758.5453) - 0.5) * 0.2 * uEnergy;
+          float glitchY = (fract(cos(aInstanceID * 78.233 + uTime) * 43758.5453) - 0.5) * 0.2 * uEnergy;
+          float scanline = sin(uTime * 10.0 + aInstanceID * 0.1) * 0.1 * sp;
+          localPan = norm2 * 0.8 * sp + glitchX + scanline;
+          localTilt = uTilt + glitchY + sin(glitchSpeed + aInstanceID) * 0.1 * sp;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1353,6 +1361,8 @@ const laserVertexShader = `
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
               }
+          } else if (uPattern == 23) {
+              patternOpMod = fract(sin(aInstanceID * 43.12 + uTime * 2.0) * 123.45) > 0.15 ? 1.0 : 0.1;
           }
       }
       
@@ -1619,6 +1629,14 @@ const laserSpotsVertexShader = `
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
+      else if (uPattern == 23) { // hologram
+          float glitchSpeed = uTime * 4.0;
+          float glitchX = (fract(sin(aInstanceID * 12.9898 + uTime) * 43758.5453) - 0.5) * 0.2 * uEnergy;
+          float glitchY = (fract(cos(aInstanceID * 78.233 + uTime) * 43758.5453) - 0.5) * 0.2 * uEnergy;
+          float scanline = sin(uTime * 10.0 + aInstanceID * 0.1) * 0.1 * sp;
+          localPan = norm2 * 0.8 * sp + glitchX + scanline;
+          localTilt = uTilt + glitchY + sin(glitchSpeed + aInstanceID) * 0.1 * sp;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1650,6 +1668,8 @@ const laserSpotsVertexShader = `
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
               }
+          } else if (uPattern == 23) {
+              patternOpMod = fract(sin(aInstanceID * 43.12 + uTime * 2.0) * 123.45) > 0.15 ? 1.0 : 0.1;
           }
       }
       
@@ -3708,6 +3728,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'inferno' && playing && !isSilent) {
     wanted = 'flame';
+
+  } else if (CFG.theme === 'hologram' && playing && !isSilent) {
+    wanted = 'hologram';
 
   } else if (!playing || isSilent) {
     // No music / silence → gentle ambient sweep
@@ -5846,6 +5869,16 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
                     break;
                 }
+                case 'hologram': {
+                    const glitchSpeed = tAnim * 4.0;
+                    const fract = x => x - Math.floor(x);
+                    const glitchX = (fract(Math.sin(i * 12.9898 + tAnim) * 43758.5453) - 0.5) * 0.2 * energy;
+                    const glitchY = (fract(Math.cos(i * 78.233 + tAnim) * 43758.5453) - 0.5) * 0.2 * energy;
+                    const scanline = Math.sin(tAnim * 10.0 + i * 0.1) * 0.1 * sp;
+                    localPan = norm2 * 0.8 * sp + glitchX + scanline;
+                    localTilt = tiltRad + glitchY + Math.sin(glitchSpeed + i) * 0.1 * sp;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -5923,6 +5956,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'liquid') {
                 // Smooth undulating opacity
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
+            } else if (pat === 'hologram') {
+                const fract = x => x - Math.floor(x);
+                patternOpMod = fract(Math.sin(i * 43.12 + tAnim * 2.0) * 123.45) > 0.15 ? 1.0 : 0.1;
             }
         }
 
