@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'stardust': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,11 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // stardust
+          float dustSpeed = uTime * 2.5;
+          localPan = sin(dustSpeed + aInstanceID * 4.0) * 0.8 * sp * (1.0 + uKick * 0.5);
+          localTilt = uTilt + cos(dustSpeed * 1.5 + norm2 * 10.0) * 0.4 * sp * uEnergy;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1623,11 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // stardust
+          float dustSpeed = uTime * 2.5;
+          localPan = sin(dustSpeed + aInstanceID * 4.0) * 0.8 * sp * (1.0 + uKick * 0.5);
+          localTilt = uTilt + cos(dustSpeed * 1.5 + norm2 * 10.0) * 0.4 * sp * uEnergy;
       }
       else {
           localTilt = uTilt;
@@ -3674,6 +3684,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   } else if (CFG.theme === 'synthwave' && playing && !isSilent) {
     // Force the vortex pattern when the synthwave theme is active and music is playing
     wanted = 'vortex';
+
+  } else if (CFG.theme === 'stardust' && playing && !isSilent) {
+    wanted = 'stardust';
 
   } else if (CFG.theme === 'ocean' && playing && !isSilent) {
     wanted = 'ocean-wave';
@@ -5844,6 +5857,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'stardust': {
+                    const dustSpeed = tAnim * 2.5;
+                    localPan = Math.sin(dustSpeed + i * 4.0) * 0.8 * sp * (1.0 + kick * 0.5);
+                    localTilt = tiltRad + Math.cos(dustSpeed * 1.5 + norm2 * 10.0) * 0.4 * sp * energy;
                     break;
                 }
                 default: {
