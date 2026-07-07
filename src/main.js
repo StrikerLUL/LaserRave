@@ -239,7 +239,7 @@ try {
     },
     setSize: () => {},
     setPixelRatio: () => {},
-    toneMapping: THREE.NoToneMapping,
+    toneMapping: 0,
     init: async () => {},
     clear: () => {},
     domElement: Object.assign(document.createElement('canvas'), {
@@ -3302,25 +3302,45 @@ function initAudioContext() {
         resume: async () => {},
         state: 'running',
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
-        decodeAudioData: async () => {
-            try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-                if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
-                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                    tempCtx.close().catch(() => {});
-                    return buf;
+        decodeAudioData: async (ab, successCallback, errorCallback) => {
+            return new Promise((resolve, reject) => {
+                const doResolve = (res) => {
+                    if (successCallback) successCallback(res);
+                    resolve(res);
+                };
+                const doReject = (err) => {
+                    if (errorCallback) errorCallback(err);
+                    reject(err);
+                };
+                try {
+                    let buf = null;
+                    const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                    if (OfflineCtxConstructor) {
+                         const tempCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                         buf = tempCtx.createBuffer(1, 44100 * 10, 44100);
+                    } else {
+                        const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                        if (TempAudioContext) {
+                            const tempCtx = new TempAudioContext();
+                            buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                            tempCtx.close().catch(() => {});
+                        }
+                    }
+                    if (buf) {
+                         doResolve(buf);
+                         return;
+                    }
+                } catch (e) {
+                    // fall through
                 }
-            } catch (e) {
-                // fall through
-            }
-            return {
-                duration: 10,
-                sampleRate: 44100,
-                length: 441000,
-                numberOfChannels: 1,
-                getChannelData: () => new Float32Array(441000)
-            };
+                doResolve({
+                    duration: 10,
+                    sampleRate: 44100,
+                    length: 441000,
+                    numberOfChannels: 1,
+                    getChannelData: () => new Float32Array(441000)
+                });
+            });
         }
     };
     analyser = audioCtx.createAnalyser();
@@ -4176,7 +4196,16 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+      try {
+        const decodeResult = audioCtx.decodeAudioData(ab, resolve, reject);
+        if (decodeResult) {
+          decodeResult.then(resolve).catch(reject);
+        }
+      } catch (e) {
+        reject(e);
+      }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4251,13 +4280,19 @@ async function loadAudio(file) {
         try {
             localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
         } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtxConstructor) {
+                const tempCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                localAudioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
-                throw e;
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                } else {
+                    throw e;
+                }
             }
         }
 
@@ -4276,13 +4311,19 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         // Attempt one last time to create an AudioBuffer, otherwise use the plain object
         try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtxConstructor) {
+                const tempCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
-                throw new Error("No AudioContext");
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                } else {
+                    throw new Error("No AudioContext");
+                }
             }
         } catch (e2) {
              audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -6964,7 +7005,7 @@ async function initRenderer() {
                 },
                 setSize: () => {},
                 setPixelRatio: () => {},
-                toneMapping: THREE.NoToneMapping,
+                toneMapping: 0,
                 init: async () => {},
                 clear: () => {},
                 domElement: Object.assign(document.createElement('canvas'), {
