@@ -1049,7 +1049,8 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22,
+    'cyber-swarm': 23
 };
 
 const laserUniforms = {
@@ -1320,6 +1321,17 @@ const laserVertexShader = `
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
+      else if (uPattern == 23) { // cyber-swarm
+          float swarmSpeed = uTime * 2.0;
+          float chaos1 = sin(swarmSpeed * 1.5 + wn * 12.0) * 0.4 * sp;
+          float chaos2 = cos(swarmSpeed * 1.8 + wn * 7.0) * 0.4 * sp;
+          localPan = norm2 * 0.6 * sp + chaos1 + sin(uTime * 3.0) * 0.2 * sp;
+          localTilt = uTilt + chaos2 + cos(uTime * 2.5) * 0.2 * sp;
+          if (uIsPeakDrop > 0.5) {
+              localPan += sin(uTime * 20.0 + wn * 50.0) * 0.2 * sp;
+              localTilt += cos(uTime * 25.0 + wn * 40.0) * 0.2 * sp;
+          }
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1349,6 +1361,8 @@ const laserVertexShader = `
               patternOpMod = 0.5 + sin(uTime * 2.0 + iPhase * 3.14159265) * 0.5;
           } else if (uPattern == 15) {
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
+          } else if (uPattern == 23) {
+              patternOpMod = 0.6 + sin(uTime * 15.0 + aInstanceID * 8.0) * 0.4;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -1619,6 +1633,17 @@ const laserSpotsVertexShader = `
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
+      else if (uPattern == 23) { // cyber-swarm
+          float swarmSpeed = uTime * 2.0;
+          float chaos1 = sin(swarmSpeed * 1.5 + wn * 12.0) * 0.4 * sp;
+          float chaos2 = cos(swarmSpeed * 1.8 + wn * 7.0) * 0.4 * sp;
+          localPan = norm2 * 0.6 * sp + chaos1 + sin(uTime * 3.0) * 0.2 * sp;
+          localTilt = uTilt + chaos2 + cos(uTime * 2.5) * 0.2 * sp;
+          if (uIsPeakDrop > 0.5) {
+              localPan += sin(uTime * 20.0 + wn * 50.0) * 0.2 * sp;
+              localTilt += cos(uTime * 25.0 + wn * 40.0) * 0.2 * sp;
+          }
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1646,6 +1671,8 @@ const laserSpotsVertexShader = `
               patternOpMod = 0.5 + sin(uTime * 2.0 + iPhase * 3.14159265) * 0.5;
           } else if (uPattern == 15) {
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
+          } else if (uPattern == 23) {
+              patternOpMod = 0.6 + sin(uTime * 15.0 + aInstanceID * 8.0) * 0.4;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -3686,6 +3713,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
+
+  } else if (CFG.theme === 'cyberswarm' && playing && !isSilent) {
+    wanted = 'cyber-swarm';
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
@@ -5846,6 +5876,18 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
                     break;
                 }
+                case 'cyber-swarm': {
+                    const swarmSpeed = tAnim * 2.0;
+                    const chaos1 = Math.sin(swarmSpeed * 1.5 + wn * 12.0) * 0.4 * sp;
+                    const chaos2 = Math.cos(swarmSpeed * 1.8 + wn * 7.0) * 0.4 * sp;
+                    localPan = norm2 * 0.6 * sp + chaos1 + Math.sin(tAnim * 3.0) * 0.2 * sp;
+                    localTilt = tiltRad + chaos2 + Math.cos(tAnim * 2.5) * 0.2 * sp;
+                    if (isPeakDrop) {
+                        localPan += Math.sin(tAnim * 20.0 + wn * 50.0) * 0.2 * sp;
+                        localTilt += Math.cos(tAnim * 25.0 + wn * 40.0) * 0.2 * sp;
+                    }
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -5918,6 +5960,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 patternOpMod = 0.5 + Math.sin(tAnim * 2.0 + iPhase * Math.PI) * 0.5;
             } else if (pat === 'starburst') {
                 patternOpMod = (Math.sin(tAnim * 12.0 + i * 5.0) > 0.5) ? 1.0 : 0.2;
+            } else if (pat === 'cyber-swarm') {
+                patternOpMod = 0.6 + Math.sin(tAnim * 15.0 + i * 8.0) * 0.4;
             } else if (pat === 'strobe' && !beatState.strobeOn && playing) {
                 patternOpMod = 0.0;
             } else if (pat === 'liquid') {
