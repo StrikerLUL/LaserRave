@@ -239,7 +239,7 @@ try {
     },
     setSize: () => {},
     setPixelRatio: () => {},
-    toneMapping: THREE.NoToneMapping,
+    toneMapping: 0,
     init: async () => {},
     clear: () => {},
     domElement: Object.assign(document.createElement('canvas'), {
@@ -3304,12 +3304,18 @@ function initAudioContext() {
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
         decodeAudioData: async () => {
             try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-                if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
-                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                    tempCtx.close().catch(() => {});
-                    return buf;
+                const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtxConstructor) {
+                    const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                    return offlineCtx.createBuffer(1, offlineCtx.sampleRate * 10, offlineCtx.sampleRate);
+                } else {
+                    const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (TempAudioContext) {
+                        const tempCtx = new TempAudioContext();
+                        const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                        tempCtx.close().catch(() => {});
+                        return buf;
+                    }
                 }
             } catch (e) {
                 // fall through
@@ -4176,7 +4182,10 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+        const decodeResult = audioCtx.decodeAudioData(ab, resolve, reject);
+        if (decodeResult) decodeResult.then(resolve).catch(reject);
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4276,13 +4285,19 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         // Attempt one last time to create an AudioBuffer, otherwise use the plain object
         try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtxConstructor) {
+                const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+                audioBuffer = offlineCtx.createBuffer(1, offlineCtx.sampleRate * 10, offlineCtx.sampleRate);
             } else {
-                throw new Error("No AudioContext");
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                } else {
+                    throw new Error("No AudioContext");
+                }
             }
         } catch (e2) {
              audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -4346,13 +4361,19 @@ async function togglePlay() {
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       try {
-          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-          if (TempAudioContext) {
-              const tempCtx = new TempAudioContext();
-              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-              tempCtx.close().catch(() => {});
+          const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtxConstructor) {
+              const offlineCtx = new OfflineCtxConstructor(1, 44100 * 10, 44100);
+              audioBuffer = offlineCtx.createBuffer(1, offlineCtx.sampleRate * 10, offlineCtx.sampleRate);
           } else {
-              throw new Error("No AudioContext");
+              const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+              if (TempAudioContext) {
+                  const tempCtx = new TempAudioContext();
+                  audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                  tempCtx.close().catch(() => {});
+              } else {
+                  throw new Error("No AudioContext");
+              }
           }
       } catch (e2) {
            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -6897,10 +6918,18 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try {
+              renderer.render(scene, camera);
+          } catch(renderErr) {
+              console.error('Fallback renderer.render failed:', renderErr);
+          }
       }
   } else {
-      renderer.render(scene, camera);
+      try {
+          renderer.render(scene, camera);
+      } catch(renderErr) {
+          console.error('renderer.render failed:', renderErr);
+      }
   }
 
   if (needsScreenshot) {
@@ -6964,7 +6993,7 @@ async function initRenderer() {
                 },
                 setSize: () => {},
                 setPixelRatio: () => {},
-                toneMapping: THREE.NoToneMapping,
+                toneMapping: 0,
                 init: async () => {},
                 clear: () => {},
                 domElement: Object.assign(document.createElement('canvas'), {
