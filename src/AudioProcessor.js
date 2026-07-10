@@ -10,11 +10,27 @@ export class AudioProcessor {
 
     // TODO: Migrate loadAudio and detectBeat logic here
     init() {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        this.audioContext = new AudioContext();
-        this.analyser = this.audioContext.createAnalyser();
-        this.analyser.fftSize = 2048;
-        this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.audioContext = new AudioContext();
+            this.analyser = this.audioContext.createAnalyser();
+            this.analyser.fftSize = 2048;
+            this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+        } catch (e) {
+            console.warn("Failed to initialize AudioContext in AudioProcessor, falling back to offline or mock context", e);
+            try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                this.audioContext = new OfflineCtx(1, 2048, 44100);
+                this.analyser = this.audioContext.createAnalyser();
+                this.analyser.fftSize = 2048;
+                this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+            } catch (fallbackError) {
+                console.error("AudioProcessor mock fallback failed", fallbackError);
+                this.audioContext = {};
+                this.analyser = { getByteFrequencyData: () => {} };
+                this.dataArray = new Uint8Array(1024);
+            }
+        }
     }
 
     analyzeFrame() {
