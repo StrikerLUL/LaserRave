@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'nebula-burst': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,13 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // nebula-burst
+          float burstSpeed = uTime * 2.0;
+          float expandRadius = 0.4 * sp + sin(burstSpeed * 0.8) * 0.2;
+          float angle = burstSpeed + norm2 * 3.14159265 * 6.0;
+          localPan = cos(angle) * expandRadius * sp * (1.0 + uBass * 0.3);
+          localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + uMid * 0.3);
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1625,13 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // nebula-burst
+          float burstSpeed = uTime * 2.0;
+          float expandRadius = 0.4 * sp + sin(burstSpeed * 0.8) * 0.2;
+          float angle = burstSpeed + norm2 * 3.14159265 * 6.0;
+          localPan = cos(angle) * expandRadius * sp * (1.0 + uBass * 0.3);
+          localTilt = uTilt + sin(angle) * expandRadius * sp * (1.0 + uMid * 0.3);
       }
       else {
           localTilt = uTilt;
@@ -3667,7 +3681,10 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   // ── 1. Determine what pattern is WANTED right now ───────────────────
   let wanted;
 
-  if (CFG.theme === 'ocean' && playing && !isSilent) {
+  if (CFG.theme === 'nebula' && playing && !isSilent) {
+    wanted = 'nebula-burst';
+
+  } else if (CFG.theme === 'ocean' && playing && !isSilent) {
     // Force the liquid pattern when the ocean theme is active and music is playing
     wanted = 'liquid';
 
@@ -5844,6 +5861,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'nebula-burst': {
+                    const burstSpeed = tAnim * 2.0;
+                    const expandRadius = 0.4 * sp + Math.sin(burstSpeed * 0.8) * 0.2;
+                    const angle = burstSpeed + norm2 * Math.PI * 6.0;
+                    localPan = Math.cos(angle) * expandRadius * sp * (1 + bass * 0.3);
+                    localTilt = tiltRad + Math.sin(angle) * expandRadius * sp * (1 + mid * 0.3);
                     break;
                 }
                 default: {
