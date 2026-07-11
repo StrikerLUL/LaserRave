@@ -199,8 +199,16 @@ try {
       isWebGPU = false;
       console.log('WebGLRenderer initialized successfully');
     } catch (webglErr) {
-      console.error("WebGLRenderer init failed", webglErr);
-      throw webglErr;
+      console.error("WebGLRenderer init failed, using mock renderer fallback", webglErr);
+      renderer = {
+        render: () => {},
+        setSize: () => {},
+        setPixelRatio: () => {},
+        domElement: document.createElement('canvas'),
+        toneMapping: 0,
+        toneMappingExposure: 1
+      };
+      isWebGPU = false;
     }
   }
   renderer.setSize(W, H);
@@ -3304,11 +3312,10 @@ function initAudioContext() {
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
         decodeAudioData: async () => {
             try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
                 if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
+                    const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
                     const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                    tempCtx.close().catch(() => {});
                     return buf;
                 }
             } catch (e) {
@@ -4176,7 +4183,16 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+    audioBuffer = await new Promise((resolve, reject) => {
+        try {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p && typeof p.then === 'function') {
+                p.then(resolve).catch(reject);
+            }
+        } catch (e) {
+            reject(e);
+        }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4251,11 +4267,10 @@ async function loadAudio(file) {
         try {
             localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
         } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
             if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
+                const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
                 localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
             } else {
                 throw e;
             }
@@ -4276,11 +4291,10 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         // Attempt one last time to create an AudioBuffer, otherwise use the plain object
         try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+            const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
             if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
+                const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
                 audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
             } else {
                 throw new Error("No AudioContext");
             }
@@ -4346,11 +4360,10 @@ async function togglePlay() {
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       try {
-          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+          const TempAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
           if (TempAudioContext) {
-              const tempCtx = new TempAudioContext();
+              const tempCtx = new TempAudioContext(1, 44100 * 10, 44100);
               audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-              tempCtx.close().catch(() => {});
           } else {
               throw new Error("No AudioContext");
           }
@@ -6889,18 +6902,22 @@ function animate() {
   camera.position.add(_camShake);
 
   // Render pipeline — try TSL postProcessing first, fall back to standard render
-  if (postProcessing && isWebGPU) {
-      try {
-          postProcessing.render();
-      } catch(e) {
-          // PostProcessing failed (e.g. WebGPU context lost or TSL error) — disable and fall back
-          console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
-          postProcessing = null;
-          isWebGPU = false;
+  try {
+      if (postProcessing && isWebGPU) {
+          try {
+              postProcessing.render();
+          } catch(e) {
+              // PostProcessing failed (e.g. WebGPU context lost or TSL error) — disable and fall back
+              console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
+              postProcessing = null;
+              isWebGPU = false;
+              renderer.render(scene, camera);
+          }
+      } else {
           renderer.render(scene, camera);
       }
-  } else {
-      renderer.render(scene, camera);
+  } catch(e) {
+      console.warn("Renderer render failed, falling back to skip frame", e);
   }
 
   if (needsScreenshot) {
@@ -7274,6 +7291,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder not supported");
+        }
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
@@ -7333,6 +7353,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap not supported");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
