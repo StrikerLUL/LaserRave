@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'quantum-vibe': 23
 };
 
 const laserUniforms = {
@@ -1320,6 +1320,11 @@ const laserVertexShader = `
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
+      else if (uPattern == 23) { // quantum-vibe
+          float qSpeed = uTime * 2.5;
+          localPan = sin(qSpeed + aInstanceID * 0.8) * 0.6 * sp + norm2 * 0.4 * sp;
+          localTilt = uTilt + cos(qSpeed * 1.2 + aInstanceID * 0.4) * 0.3 * sp + uBass * 0.2;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1353,6 +1358,8 @@ const laserVertexShader = `
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
               }
+          } else if (uPattern == 23) {
+              patternOpMod = 0.5 + sin(uTime * 3.0 + aInstanceID * 0.5) * 0.5;
           }
       }
       
@@ -1619,6 +1626,11 @@ const laserSpotsVertexShader = `
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
       }
+      else if (uPattern == 23) { // quantum-vibe
+          float qSpeed = uTime * 2.5;
+          localPan = sin(qSpeed + aInstanceID * 0.8) * 0.6 * sp + norm2 * 0.4 * sp;
+          localTilt = uTilt + cos(qSpeed * 1.2 + aInstanceID * 0.4) * 0.3 * sp + uBass * 0.2;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1650,6 +1662,8 @@ const laserSpotsVertexShader = `
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
               }
+          } else if (uPattern == 23) {
+              patternOpMod = 0.5 + sin(uTime * 3.0 + aInstanceID * 0.5) * 0.5;
           }
       }
       
@@ -3686,6 +3700,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
+
+  } else if (CFG.theme === 'quantum' && playing && !isSilent) {
+    wanted = 'quantum-vibe';
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
@@ -5846,6 +5863,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
                     break;
                 }
+                case 'quantum-vibe': {
+                    const qSpeed = tAnim * 2.5;
+                    localPan = Math.sin(qSpeed + i * 0.8) * 0.6 * sp + norm2 * 0.4 * sp;
+                    localTilt = tiltRad + Math.cos(qSpeed * 1.2 + i * 0.4) * 0.3 * sp + bass * 0.2;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -5923,6 +5946,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'liquid') {
                 // Smooth undulating opacity
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
+            } else if (pat === 'quantum-vibe') {
+                patternOpMod = 0.5 + Math.sin(tAnim * 3.0 + i * 0.5) * 0.5;
             }
         }
 
