@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'cyber-storm': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,13 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-storm
+          float stormSpeed = uTime * 2.5;
+          float chaoticPan = sin(stormSpeed + aInstanceID * 1.5) * 0.7 * sp;
+          float chaoticTilt = cos(stormSpeed * 1.2 + aInstanceID * 2.0) * 0.5 * sp;
+          localPan = norm2 * 0.4 * sp + chaoticPan + uKick * 0.3 * iPhase;
+          localTilt = uTilt + chaoticTilt + uBass * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1625,13 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // cyber-storm
+          float stormSpeed = uTime * 2.5;
+          float chaoticPan = sin(stormSpeed + aInstanceID * 1.5) * 0.7 * sp;
+          float chaoticTilt = cos(stormSpeed * 1.2 + aInstanceID * 2.0) * 0.5 * sp;
+          localPan = norm2 * 0.4 * sp + chaoticPan + uKick * 0.3 * iPhase;
+          localTilt = uTilt + chaoticTilt + uBass * 0.4;
       }
       else {
           localTilt = uTilt;
@@ -3701,6 +3715,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'glacier';
   } else if (CFG.theme === 'hexagon' && playing && !isSilent) {
     wanted = 'hexagon';
+  } else if (CFG.theme === 'cyberstorm' && playing && !isSilent) {
+    wanted = 'cyber-storm';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
@@ -5844,6 +5860,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const sweep = Math.sin(tAnim * 2.0 + norm2 * Math.PI);
                     localPan = sweep * sp * 1.5;
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
+                    break;
+                }
+                case 'cyber-storm': {
+                    const stormSpeed = tAnim * 2.5;
+                    const chaoticPan = Math.sin(stormSpeed + i * 1.5) * 0.7 * sp;
+                    const chaoticTilt = Math.cos(stormSpeed * 1.2 + i * 2.0) * 0.5 * sp;
+                    localPan = norm2 * 0.4 * sp + chaoticPan + kick * 0.3 * iPhase;
+                    localTilt = tiltRad + chaoticTilt + bass * 0.4;
                     break;
                 }
                 default: {
