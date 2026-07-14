@@ -182,6 +182,9 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
+    if (typeof WebGPURenderer === 'undefined') {
+        throw new Error("WebGPURenderer API not available");
+    }
     throw new Error("Force WebGL Fallback to support ShaderMaterial");
     renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
@@ -192,6 +195,9 @@ try {
   } catch (e) {
     console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
     try {
+      if (typeof THREE.WebGLRenderer === 'undefined') {
+          throw new Error("WebGLRenderer API not available");
+      }
       renderer = new THREE.WebGLRenderer({
         antialias: true,
         powerPreference: "high-performance"
@@ -4176,7 +4182,22 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    try {
+        audioBuffer = await new Promise((resolve, reject) => {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p) p.then(resolve).catch(reject);
+        });
+    } catch (e) {
+        console.warn("Failed to decode audio data, using fallback buffer", e);
+        const TempContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (TempContext) {
+            const tempCtx = new TempContext(1, 44100 * 10, 44100);
+            audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+        } else {
+            throw e;
+        }
+    }
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -7274,6 +7295,10 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder API not available");
+        }
+
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
