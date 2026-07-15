@@ -10,11 +10,19 @@ export class AudioProcessor {
 
     // TODO: Migrate loadAudio and detectBeat logic here
     init() {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        this.audioContext = new AudioContext();
-        this.analyser = this.audioContext.createAnalyser();
-        this.analyser.fftSize = 2048;
-        this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) throw new Error("AudioContext not supported");
+            this.audioContext = new AudioContext();
+            this.analyser = this.audioContext.createAnalyser();
+            this.analyser.fftSize = 2048;
+            this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+        } catch (e) {
+            console.warn("Failed to initialize AudioContext in AudioProcessor:", e);
+            this.audioContext = null;
+            this.analyser = null;
+            this.dataArray = null;
+        }
     }
 
     analyzeFrame() {
