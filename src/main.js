@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight-sweep': 23
 };
 
 const laserUniforms = {
@@ -1319,6 +1319,11 @@ const laserVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // starlight-sweep
+          float sweep = sin(uTime * 1.5 + wn * 3.1415);
+          localPan = sweep * sp * 1.2;
+          localTilt = uTilt + cos(uTime * 3.0 + wn * 3.1415) * 0.3 + uHigh * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -1618,6 +1623,11 @@ const laserSpotsVertexShader = `
           float sweep = sin(uTime * 2.0 + norm2 * 3.1415);
           localPan = sweep * sp * 1.5;
           localTilt = uTilt + cos(uTime * 4.0) * 0.2 + uBass * 0.3;
+      }
+      else if (uPattern == 23) { // starlight-sweep
+          float sweep = sin(uTime * 1.5 + wn * 3.1415);
+          localPan = sweep * sp * 1.2;
+          localTilt = uTilt + cos(uTime * 3.0 + wn * 3.1415) * 0.3 + uHigh * 0.2;
       }
       else {
           localTilt = uTilt;
@@ -3703,6 +3713,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'starlight' && playing && !isSilent) {
+    wanted = 'starlight-sweep';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5846,6 +5858,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
                     break;
                 }
+                case 'starlight-sweep': {
+                    const sweep = Math.sin(tAnim * 1.5 + wn * Math.PI);
+                    localPan = sweep * sp * 1.2;
+                    localTilt = tiltRad + Math.cos(tAnim * 3.0 + wn * Math.PI) * 0.3 + high * 0.2;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -5923,6 +5941,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'liquid') {
                 // Smooth undulating opacity
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
+            } else if (pat === 'starlight-sweep') {
+                // Shimmering opacity
+                patternOpMod = 0.8 + Math.sin(tAnim * 5.0 + i * 2.0) * 0.2;
             }
         }
 
