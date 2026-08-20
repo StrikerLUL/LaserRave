@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'emerald-splash': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'emerald-splash': 23, 'starlight': 24
 };
 
 const laserUniforms = {
@@ -1326,6 +1326,12 @@ const laserVertexShader = `
           localPan = splashX + norm2 * 0.4 * sp;
           localTilt = uTilt + splashY + uKick * 0.4;
       }
+      else if (uPattern == 24) { // starlight
+          float driftX = uTime * lxf * 0.1;
+          float driftY = uTime * lyf * 0.15;
+          localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
+          localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1355,6 +1361,8 @@ const laserVertexShader = `
               patternOpMod = 0.5 + sin(uTime * 2.0 + iPhase * 3.14159265) * 0.5;
           } else if (uPattern == 15) {
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
+          } else if (uPattern == 23 || uPattern == 24) {
+              patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -1631,6 +1639,12 @@ const laserSpotsVertexShader = `
           localPan = splashX + norm2 * 0.4 * sp;
           localTilt = uTilt + splashY + uKick * 0.4;
       }
+      else if (uPattern == 24) { // starlight
+          float driftX = uTime * lxf * 0.1;
+          float driftY = uTime * lyf * 0.15;
+          localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
+          localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1658,6 +1672,8 @@ const laserSpotsVertexShader = `
               patternOpMod = 0.5 + sin(uTime * 2.0 + iPhase * 3.14159265) * 0.5;
           } else if (uPattern == 15) {
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
+          } else if (uPattern == 23 || uPattern == 24) {
+              patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -3316,6 +3332,16 @@ function initAudioContext() {
         createMediaStreamDestination: () => ({ stream: new MediaStream() }),
         decodeAudioData: async () => {
             try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                    return tempCtx.createBuffer(1, 44100 * 10, 44100);
+                }
+            } catch (e) {
+                // fall through
+            }
+
+            try {
                 const TempAudioContext = window.AudioContext || window.webkitAudioContext;
                 if (TempAudioContext) {
                     const tempCtx = new TempAudioContext();
@@ -3326,6 +3352,7 @@ function initAudioContext() {
             } catch (e) {
                 // fall through
             }
+
             return {
                 duration: 10,
                 sampleRate: 44100,
@@ -3718,6 +3745,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'hexagon';
   } else if (CFG.theme === 'bloodmoon' && playing && !isSilent) {
     wanted = 'blood-sweep';
+  } else if (CFG.theme === 'starlight' && playing && !isSilent) {
+    wanted = 'starlight';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -4191,7 +4220,17 @@ async function loadAudio(file) {
 
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
-    audioBuffer = await audioCtx.decodeAudioData(ab);
+
+    audioBuffer = await new Promise((resolve, reject) => {
+      try {
+        const p = audioCtx.decodeAudioData(ab, resolve, reject);
+        if (p && typeof p.catch === 'function') {
+          p.catch(reject);
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
 
     // Store in the playlist queue item
     let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
@@ -4300,7 +4339,17 @@ async function loadAudio(file) {
                 throw new Error("No AudioContext");
             }
         } catch (e2) {
-             audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+             try {
+                 const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                 if (OfflineCtx) {
+                     const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                     audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+                 } else {
+                     throw new Error("No OfflineAudioContext");
+                 }
+             } catch (e3) {
+                 audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+             }
         }
 
         songMap = {
@@ -5861,6 +5910,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(tAnim * 4.0) * 0.2 + bass * 0.3;
                     break;
                 }
+                case 'starlight': {
+                    const driftX = tAnim * lxf * 0.1;
+                    const driftY = tAnim * lyf * 0.15;
+                    localPan = norm2 * 0.9 * sp + Math.sin(driftX + lxp) * 0.2 * sp;
+                    localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -5938,6 +5994,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'liquid') {
                 // Smooth undulating opacity
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
+            } else if (pat === 'starlight') {
+                patternOpMod = 0.4 + (Math.sin(tAnim * 3.0 + i * 11.0) * Math.sin(tAnim * 1.5 + i * 3.7)) * 0.6;
             }
         }
 
@@ -6912,10 +6970,18 @@ function animate() {
           console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
           postProcessing = null;
           isWebGPU = false;
-          renderer.render(scene, camera);
+          try {
+              renderer.render(scene, camera);
+          } catch(err) {
+              console.warn("Fallback WebGL renderer.render() failed:", err);
+          }
       }
   } else {
-      renderer.render(scene, camera);
+      try {
+          renderer.render(scene, camera);
+      } catch(err) {
+          console.warn("renderer.render() failed:", err);
+      }
   }
 
   if (needsScreenshot) {
