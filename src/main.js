@@ -182,6 +182,7 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
+    if (typeof WebGPURenderer === 'undefined') throw new Error('WebGPURenderer is not defined');
     throw new Error("Force WebGL Fallback to support ShaderMaterial");
     renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
@@ -3278,6 +3279,15 @@ function initAudioContext() {
         }),
         createBuffer: (channels, length, sampleRate) => {
             try {
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                    return tempCtx.createBuffer(channels, length, sampleRate);
+                }
+            } catch (e) {
+                // fall through
+            }
+            try {
                 const TempAudioContext = window.AudioContext || window.webkitAudioContext;
                 if (TempAudioContext) {
                     const tempCtx = new TempAudioContext();
@@ -4290,13 +4300,19 @@ async function loadAudio(file) {
         try {
             localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
         } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                localAudioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
-                throw e;
+                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+                if (TempAudioContext) {
+                    const tempCtx = new TempAudioContext();
+                    localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                    tempCtx.close().catch(() => {});
+                } else {
+                    throw e;
+                }
             }
         }
 
@@ -4395,13 +4411,19 @@ async function togglePlay() {
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       try {
-          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-          if (TempAudioContext) {
-              const tempCtx = new TempAudioContext();
-              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-              tempCtx.close().catch(() => {});
+          const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtx) {
+              const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+              audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
           } else {
-              throw new Error("No AudioContext");
+              const TempAudioContext = window.AudioContext || window.webkitAudioContext;
+              if (TempAudioContext) {
+                  const tempCtx = new TempAudioContext();
+                  audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
+                  tempCtx.close().catch(() => {});
+              } else {
+                  throw new Error("No AudioContext");
+              }
           }
       } catch (e2) {
            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -7340,6 +7362,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') { throw new Error('VideoEncoder not supported'); }
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
