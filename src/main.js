@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23, 'nebula': 24
 };
 
 const laserUniforms = {
@@ -1325,6 +1325,12 @@ const laserVertexShader = `
           float driftY = uTime * lyf * 0.15;
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
+      else if (uPattern == 24) { // nebula
+          float nebulaSpeed = uTime * 0.5;
+          float radius = 0.6 * sp;
+          localPan = sin(nebulaSpeed + aInstanceID * 0.3) * radius + norm2 * 0.4 * sp;
+          localTilt = uTilt + cos(nebulaSpeed * 1.2 + lyp) * radius * 0.4 + 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -1632,6 +1638,12 @@ const laserSpotsVertexShader = `
           float driftY = uTime * lyf * 0.15;
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
+      else if (uPattern == 24) { // nebula
+          float nebulaSpeed = uTime * 0.5;
+          float radius = 0.6 * sp;
+          localPan = sin(nebulaSpeed + aInstanceID * 0.3) * radius + norm2 * 0.4 * sp;
+          localTilt = uTilt + cos(nebulaSpeed * 1.2 + lyp) * radius * 0.4 + 0.1 * sp;
       }
       else {
           localTilt = uTilt;
@@ -3732,6 +3744,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'blood-sweep';
   } else if (CFG.theme === 'starlight' && playing && !isSilent) {
     wanted = 'starlight';
+  } else if (CFG.theme === 'nebula' && playing && !isSilent) {
+    wanted = 'nebula';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5900,6 +5914,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const driftY = tAnim * lyf * 0.15;
                     localPan = norm2 * 0.9 * sp + Math.sin(driftX + lxp) * 0.2 * sp;
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
+                    break;
+                }
+                case 'nebula': {
+                    const nebulaSpeed = tAnim * 0.5;
+                    const radius = 0.6 * sp;
+                    localPan = Math.sin(nebulaSpeed + i * 0.3) * radius + norm2 * 0.4 * sp;
+                    localTilt = tiltRad + Math.cos(nebulaSpeed * 1.2 + lyp) * radius * 0.4 + 0.1 * sp;
                     break;
                 }
                 default: {
