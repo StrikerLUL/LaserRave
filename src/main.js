@@ -182,7 +182,13 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
+    if (typeof WebGPURenderer === 'undefined') {
+        throw new Error("WebGPURenderer is not available");
+    }
+    // We keep the forced error for now because the project relies on ShaderMaterial
+    // which WebGPURenderer doesn't natively support without NodeMaterial.
     throw new Error("Force WebGL Fallback to support ShaderMaterial");
+
     renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
       powerPreference: "high-performance"
@@ -4203,14 +4209,16 @@ async function loadAudio(file) {
     if (playing && source) { source.stop(); playing = false; }
     playbackStartOffset = 0;
 
+    if (!file) throw new Error("No audio file provided");
+
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
 
     audioBuffer = await new Promise((resolve, reject) => {
       try {
         const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
+        if (p && typeof p.then === 'function') {
+          p.then(resolve).catch(reject);
         }
       } catch (err) {
         reject(err);
