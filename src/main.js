@@ -3714,6 +3714,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   } else if (CFG.theme === 'neoncity' && playing && !isSilent) {
     wanted = 'dna';
 
+  } else if (CFG.theme === 'cybertron' && playing && !isSilent) {
+    wanted = 'cybertron-scan';
+
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
   } else if (CFG.theme === 'eclipse' && playing && !isSilent) {
@@ -5769,6 +5772,15 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(dnaPhase) * 0.4 * sp * strand + bass * 0.2;
                     break;
                 }
+                // ─── CYBERTRON-SCAN: Grid scanning effect for cybertron theme ───
+                case 'cybertron-scan': {
+                    const scanSpeed = tAnim * 2.0;
+                    const scanWidth = 0.6 * sp;
+                    const sweep = Math.sin(scanSpeed + wn * Math.PI) * scanWidth;
+                    localPan = sweep;
+                    localTilt = tiltRad + Math.cos(scanSpeed * 1.5 + wn * Math.PI) * 0.2 * sp * (1 + bass * 0.4);
+                    break;
+                }
                 // ─── SUPERNOVA: Cosmic expanding/contracting effect ──────────
                 case 'supernova': {
                     const novaSpeed = tAnim * 2.5;
@@ -5981,6 +5993,9 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
             } else if (pat === 'starlight') {
                 patternOpMod = 0.4 + (Math.sin(tAnim * 3.0 + i * 11.0) * Math.sin(tAnim * 1.5 + i * 3.7)) * 0.6;
+            } else if (pat === 'cybertron-scan') {
+                const scanPos = (tAnim * 1.5) - Math.floor(tAnim * 1.5);
+                patternOpMod = Math.abs(wn - scanPos) < 0.15 ? 1.0 : 0.2;
             }
         }
 
