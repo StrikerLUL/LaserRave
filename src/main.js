@@ -182,6 +182,7 @@ let renderer;
 let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
   try {
+    if (typeof WebGPURenderer === 'undefined') throw new Error("WebGPURenderer is undefined");
     throw new Error("Force WebGL Fallback to support ShaderMaterial");
     renderer = new WebGPURenderer({ forceWebGL: true,
       antialias: true,
@@ -4203,6 +4204,10 @@ async function loadAudio(file) {
     if (playing && source) { source.stop(); playing = false; }
     playbackStartOffset = 0;
 
+    if (!file) {
+      console.warn("No file provided to loadAudio. Triggering fallback.");
+      throw new Error("No file provided");
+    }
     const ab = await file.arrayBuffer();
     if (!audioCtx) throw new Error("AudioContext not initialized");
 
@@ -7352,6 +7357,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             },
             error: (e) => console.error("VideoEncoder Error", e)
         };
+        if (typeof VideoEncoder === 'undefined') throw new Error("VideoEncoder not supported");
         encoder = new VideoEncoder(init);
         // Simple codec configuration
         encoder.configure({
@@ -7399,6 +7405,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') throw new Error("createImageBitmap not supported");
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
