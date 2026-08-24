@@ -1049,7 +1049,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23, 'neon-pulse': 24
 };
 
 const laserUniforms = {
@@ -1325,6 +1325,13 @@ const laserVertexShader = `
           float driftY = uTime * lyf * 0.15;
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
+      else if (uPattern == 24) { // neon-pulse
+          float spinSpeed = uTime * 4.0;
+          float expandRadius = 0.5 * sp + uBass * 0.5 * sp;
+          float angle = spinSpeed + wn * 3.14159265 * 6.0;
+          localPan = cos(angle) * expandRadius + norm2 * 0.2 * sp;
+          localTilt = uTilt + sin(angle) * expandRadius;
       }
       else {
           localTilt = uTilt;
@@ -1632,6 +1639,13 @@ const laserSpotsVertexShader = `
           float driftY = uTime * lyf * 0.15;
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
+      else if (uPattern == 24) { // neon-pulse
+          float spinSpeed = uTime * 4.0;
+          float expandRadius = 0.5 * sp + uBass * 0.5 * sp;
+          float angle = spinSpeed + wn * 3.14159265 * 6.0;
+          localPan = cos(angle) * expandRadius + norm2 * 0.2 * sp;
+          localTilt = uTilt + sin(angle) * expandRadius;
       }
       else {
           localTilt = uTilt;
@@ -5900,6 +5914,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const driftY = tAnim * lyf * 0.15;
                     localPan = norm2 * 0.9 * sp + Math.sin(driftX + lxp) * 0.2 * sp;
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
+                    break;
+                }
+                case 'neon-pulse': {
+                    const spinSpeed = tAnim * 4.0;
+                    const expandRadius = 0.5 * sp + bass * 0.5 * sp;
+                    const angle = spinSpeed + wn * Math.PI * 6.0;
+                    localPan = Math.cos(angle) * expandRadius + norm2 * 0.2 * sp;
+                    localTilt = tiltRad + Math.sin(angle) * expandRadius;
                     break;
                 }
                 default: {
