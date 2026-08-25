@@ -17,7 +17,19 @@ export class AudioProcessor {
             this.analyser.fftSize = 2048;
             this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
         } catch (e) {
-            console.warn("Failed to initialize AudioContext in AudioProcessor, using mock objects:", e);
+            console.warn("Failed to initialize AudioContext in AudioProcessor, trying OfflineAudioContext fallback:", e);
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                try {
+                    this.audioContext = new OfflineCtx(1, 44100 * 10, 44100);
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 2048;
+                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                    return;
+                } catch (offlineErr) {
+                    console.warn("OfflineAudioContext fallback failed, using mock objects:", offlineErr);
+                }
+            }
             this.audioContext = {
                 sampleRate: 44100,
                 currentTime: 0,

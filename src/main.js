@@ -240,7 +240,7 @@ try {
     },
     setSize: () => {},
     setPixelRatio: () => {},
-    toneMapping: THREE.NoToneMapping,
+    toneMapping: 0,
     init: async () => {},
     clear: () => {},
     domElement: Object.assign(document.createElement('canvas'), {
@@ -4208,24 +4208,33 @@ async function loadAudio(file) {
     playbackStartOffset = 0;
 
     if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-
-    audioBuffer = await new Promise((resolve, reject) => {
-      try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
-        }
-      } catch (err) {
-        reject(err);
+      console.warn("No audio file provided, generating silent fallback buffer");
+      const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (OfflineCtx) {
+          const ctx = new OfflineCtx(1, 44100 * 10, 44100);
+          audioBuffer = ctx.createBuffer(1, ctx.sampleRate * 10, ctx.sampleRate);
+      } else {
+          // If no context exists at all, make a minimal object
+          audioBuffer = { duration: 10, length: 441000, sampleRate: 44100, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
       }
-    });
+    } else {
+      const ab = await file.arrayBuffer();
+      if (!audioCtx) throw new Error("AudioContext not initialized");
+
+      audioBuffer = await new Promise((resolve, reject) => {
+        try {
+          const p = audioCtx.decodeAudioData(ab, resolve, reject);
+          if (p && typeof p.catch === 'function') {
+            p.catch(reject);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = file ? playlist.find(item => item.file === file || item.name === file.name) : null;
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -7049,7 +7058,7 @@ async function initRenderer() {
                 },
                 setSize: () => {},
                 setPixelRatio: () => {},
-                toneMapping: THREE.NoToneMapping,
+                toneMapping: 0,
                 init: async () => {},
                 clear: () => {},
                 domElement: Object.assign(document.createElement('canvas'), {
@@ -7371,6 +7380,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             },
             error: (e) => console.error("VideoEncoder Error", e)
         };
+        if (typeof VideoEncoder === 'undefined') throw new Error("VideoEncoder not supported");
         encoder = new VideoEncoder(init);
         // Simple codec configuration
         encoder.configure({
@@ -7418,6 +7428,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') throw new Error("createImageBitmap not supported");
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
