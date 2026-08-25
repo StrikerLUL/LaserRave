@@ -1050,7 +1050,8 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23,
+    'emerald-sweep': 24
 };
 
 const laserUniforms = {
@@ -1327,6 +1328,11 @@ const laserVertexShader = `
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
       }
+      else if (uPattern == 24) { // emerald-sweep
+          float driftX = uTime * lxf * 0.2;
+          localPan = norm2 * 1.2 * sp + sin(driftX + lxp) * 0.4 * sp;
+          localTilt = uTilt + cos(uTime * lyf * 0.2 + lyp) * 0.3 * sp - 0.05;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1358,6 +1364,8 @@ const laserVertexShader = `
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
           } else if (uPattern == 23) {
               patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
+          } else if (uPattern == 24) {
+              patternOpMod = 0.5 + sin(uTime * 4.0 + aInstanceID * 2.0) * 0.5;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -1634,6 +1642,11 @@ const laserSpotsVertexShader = `
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
       }
+      else if (uPattern == 24) { // emerald-sweep
+          float driftX = uTime * lxf * 0.2;
+          localPan = norm2 * 1.2 * sp + sin(driftX + lxp) * 0.4 * sp;
+          localTilt = uTilt + cos(uTime * lyf * 0.2 + lyp) * 0.3 * sp - 0.05;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1663,6 +1676,8 @@ const laserSpotsVertexShader = `
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
           } else if (uPattern == 23) {
               patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
+          } else if (uPattern == 24) {
+              patternOpMod = 0.5 + sin(uTime * 4.0 + aInstanceID * 2.0) * 0.5;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -3717,6 +3732,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
 
   } else if (CFG.theme === 'cybertron' && playing && !isSilent) {
     wanted = 'cybertron-scan';
+
+  } else if (CFG.theme === 'emerald' && playing && !isSilent) {
+    wanted = 'emerald-sweep';
 
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
@@ -5918,6 +5936,12 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
                     break;
                 }
+                case 'emerald-sweep': {
+                    const driftX = tAnim * lxf * 0.2;
+                    localPan = norm2 * 1.2 * sp + Math.sin(driftX + lxp) * 0.4 * sp;
+                    localTilt = tiltRad + Math.cos(tAnim * lyf * 0.2 + lyp) * 0.3 * sp - 0.05;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -6000,6 +6024,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
             } else if (pat === 'cybertron-scan') {
                 const scanPos = (tAnim * 1.5) - Math.floor(tAnim * 1.5);
                 patternOpMod = Math.abs(wn - scanPos) < 0.15 ? 1.0 : 0.2;
+            } else if (pat === 'emerald-sweep') {
+                patternOpMod = 0.5 + Math.sin(tAnim * 4.0 + i * 2.0) * 0.5;
             }
         }
 
