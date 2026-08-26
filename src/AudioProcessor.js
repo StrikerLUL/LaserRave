@@ -25,6 +25,8 @@ export class AudioProcessor {
                 createAnalyser: () => ({
                     fftSize: 2048,
                     frequencyBinCount: 1024,
+                    connect: () => {},
+                    disconnect: () => {},
                     getByteFrequencyData: () => {}
                 })
             };
