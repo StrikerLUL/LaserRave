@@ -1050,7 +1050,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23, 'solar-flare': 24
 };
 
 const laserUniforms = {
@@ -1327,6 +1327,12 @@ const laserVertexShader = `
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
       }
+      else if (uPattern == 24) { // solar-flare
+          float flareSpeed = uTime * 2.0;
+          float flareRadius = 0.5 * sp + sin(flareSpeed * 0.5) * 0.2 * sp;
+          localPan = norm2 * 0.6 * sp + sin(flareSpeed + aInstanceID * 0.5) * flareRadius * (1.0 + uKick * 0.5);
+          localTilt = uTilt + cos(flareSpeed * 1.2 + aInstanceID * 0.3) * flareRadius + uBass * 0.3;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1358,6 +1364,8 @@ const laserVertexShader = `
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
           } else if (uPattern == 23) {
               patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
+          } else if (uPattern == 24) {
+              patternOpMod = 0.5 + sin(uTime * 4.0 + aInstanceID * 2.0) * 0.5;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -1634,6 +1642,12 @@ const laserSpotsVertexShader = `
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
       }
+      else if (uPattern == 24) { // solar-flare
+          float flareSpeed = uTime * 2.0;
+          float flareRadius = 0.5 * sp + sin(flareSpeed * 0.5) * 0.2 * sp;
+          localPan = norm2 * 0.6 * sp + sin(flareSpeed + aInstanceID * 0.5) * flareRadius * (1.0 + uKick * 0.5);
+          localTilt = uTilt + cos(flareSpeed * 1.2 + aInstanceID * 0.3) * flareRadius + uBass * 0.3;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -1663,6 +1677,8 @@ const laserSpotsVertexShader = `
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
           } else if (uPattern == 23) {
               patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
+          } else if (uPattern == 24) {
+              patternOpMod = 0.5 + sin(uTime * 4.0 + aInstanceID * 2.0) * 0.5;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -3736,6 +3752,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'blood-sweep';
   } else if (CFG.theme === 'starlight' && playing && !isSilent) {
     wanted = 'starlight';
+  } else if (CFG.theme === 'solarflare' && playing && !isSilent) {
+    wanted = 'solar-flare';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -5916,6 +5934,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const driftY = tAnim * lyf * 0.15;
                     localPan = norm2 * 0.9 * sp + Math.sin(driftX + lxp) * 0.2 * sp;
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
+                    break;
+                }
+                case 'solar-flare': {
+                    const flareSpeed = tAnim * 2.0;
+                    const flareRadius = 0.5 * sp + Math.sin(flareSpeed * 0.5) * 0.2 * sp;
+                    localPan = norm2 * 0.6 * sp + Math.sin(flareSpeed + i * 0.5) * flareRadius * (1.0 + kick * 0.5);
+                    localTilt = tiltRad + Math.cos(flareSpeed * 1.2 + i * 0.3) * flareRadius + bass * 0.3;
                     break;
                 }
                 default: {
