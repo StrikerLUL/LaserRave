@@ -4208,24 +4208,27 @@ async function loadAudio(file) {
     playbackStartOffset = 0;
 
     if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
+      console.warn("No audio file provided. Using silent fallback.");
+      if (!audioCtx) throw new Error("AudioContext not initialized");
+      audioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+    } else {
+      const ab = await file.arrayBuffer();
+      if (!audioCtx) throw new Error("AudioContext not initialized");
 
-    audioBuffer = await new Promise((resolve, reject) => {
-      try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
+      audioBuffer = await new Promise((resolve, reject) => {
+        try {
+          const p = audioCtx.decodeAudioData(ab, resolve, reject);
+          if (p && typeof p.catch === 'function') {
+            p.catch(reject);
+          }
+        } catch (err) {
+          reject(err);
         }
-      } catch (err) {
-        reject(err);
-      }
-    });
+      });
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = playlist.find(item => item.file === file || (file && item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -4269,7 +4272,7 @@ async function loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(audioBuffer, file.name).then(fullMap => {
+    analyzeSong(audioBuffer, file ? file.name : "dummy_audio").then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }
@@ -7371,6 +7374,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             },
             error: (e) => console.error("VideoEncoder Error", e)
         };
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder not supported in this environment");
+        }
         encoder = new VideoEncoder(init);
         // Simple codec configuration
         encoder.configure({
@@ -7418,6 +7424,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap not supported in this environment");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
