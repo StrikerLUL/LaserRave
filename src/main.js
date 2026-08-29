@@ -240,7 +240,7 @@ try {
     },
     setSize: () => {},
     setPixelRatio: () => {},
-    toneMapping: THREE.NoToneMapping,
+    toneMapping: 0,
     init: async () => {},
     clear: () => {},
     domElement: Object.assign(document.createElement('canvas'), {
@@ -3279,12 +3279,10 @@ function initAudioContext() {
         }),
         createBuffer: (channels, length, sampleRate) => {
             try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-                if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
-                    const buf = tempCtx.createBuffer(channels, length, sampleRate);
-                    tempCtx.close().catch(() => {});
-                    return buf;
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const tempCtx = new OfflineCtx(channels, length, sampleRate);
+                    return tempCtx.createBuffer(channels, length, sampleRate);
                 }
             } catch (e) {
                 // fall through
@@ -3331,12 +3329,10 @@ function initAudioContext() {
             }
 
             try {
-                const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-                if (TempAudioContext) {
-                    const tempCtx = new TempAudioContext();
-                    const buf = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                    tempCtx.close().catch(() => {});
-                    return buf;
+                const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                if (OfflineCtx) {
+                    const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                    return tempCtx.createBuffer(1, 44100 * 10, 44100);
                 }
             } catch (e) {
                 // fall through
@@ -4208,24 +4204,36 @@ async function loadAudio(file) {
     playbackStartOffset = 0;
 
     if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-
-    audioBuffer = await new Promise((resolve, reject) => {
-      try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
+        console.warn("No audio file provided. Generating a silent dummy buffer.");
+        try {
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+            } else {
+                throw new Error("OfflineAudioContext not supported");
+            }
+        } catch (err) {
+            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
         }
-      } catch (err) {
-        reject(err);
-      }
-    });
+    } else {
+        const ab = await file.arrayBuffer();
+        if (!audioCtx) throw new Error("AudioContext not initialized");
+
+        audioBuffer = await new Promise((resolve, reject) => {
+            try {
+                const p = audioCtx.decodeAudioData(ab, resolve, reject);
+                if (p && typeof p.catch === 'function') {
+                    p.catch(reject);
+                }
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = playlist.find(item => item.file === file || (file && item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -4269,7 +4277,7 @@ async function loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(audioBuffer, file.name).then(fullMap => {
+    analyzeSong(audioBuffer, file ? file.name : "Fallback").then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }
@@ -4278,7 +4286,7 @@ async function loadAudio(file) {
         songMap = fullMap;
         waveformValid = false;
         updateTimeline();
-        console.log(`[Background Analysis] Hot-swapped map for ${playlistItem.name}`);
+        console.log(`[Background Analysis] Hot-swapped map for ${playlistItem ? playlistItem.name : "Fallback"}`);
       }
     }).catch(err => {
       console.error("Background analysis failed:", err);
@@ -4297,11 +4305,10 @@ async function loadAudio(file) {
         try {
             localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
         } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                localAudioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
                 throw e;
             }
@@ -4322,26 +4329,15 @@ async function loadAudio(file) {
         console.error("Fallback audio generation failed:", fallbackError);
         // Attempt one last time to create an AudioBuffer, otherwise use the plain object
         try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
             } else {
-                throw new Error("No AudioContext");
+                throw new Error("No OfflineAudioContext");
             }
         } catch (e2) {
-             try {
-                 const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-                 if (OfflineCtx) {
-                     const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
-                     audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
-                 } else {
-                     throw new Error("No OfflineAudioContext");
-                 }
-             } catch (e3) {
-                 audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
-             }
+            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
         }
 
         songMap = {
@@ -4402,13 +4398,12 @@ async function togglePlay() {
     if (!createdBuffer) {
       // Mock minimum buffer data so the application doesn't crash on timeline math
       try {
-          const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-          if (TempAudioContext) {
-              const tempCtx = new TempAudioContext();
-              audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-              tempCtx.close().catch(() => {});
+          const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtx) {
+              const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+              audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
           } else {
-              throw new Error("No AudioContext");
+              throw new Error("No OfflineAudioContext");
           }
       } catch (e2) {
            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
@@ -7049,7 +7044,7 @@ async function initRenderer() {
                 },
                 setSize: () => {},
                 setPixelRatio: () => {},
-                toneMapping: THREE.NoToneMapping,
+                toneMapping: 0,
                 init: async () => {},
                 clear: () => {},
                 domElement: Object.assign(document.createElement('canvas'), {
@@ -7359,6 +7354,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder not supported in this browser.");
+        }
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
@@ -7418,6 +7416,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap not supported in this browser.");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
