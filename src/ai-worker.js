@@ -88,11 +88,11 @@ export function normalize(arr) {
     return arr;
 }
 
-// Verbesserte Analyse: Kaskadierte Filter für steilere Trennung
+// Improved analysis: cascaded filters for a steeper crossover
 function createHeuristicStems(audioData, sampleRate, hopSec) {
     const hopSize = Math.round(sampleRate * hopSec);
 
-    // Kaskadierte Filter (4th order Linkwitz-Riley-ähnlich für viel schärfere Trennung!)
+    // Cascaded filters (roughly 4th-order Linkwitz-Riley) for much sharper separation
     const lpBass1 = new BiquadFilter('lowpass', 150, 0.707, sampleRate);
     const lpBass2 = new BiquadFilter('lowpass', 150, 0.707, sampleRate);
     
@@ -117,11 +117,11 @@ function createHeuristicStems(audioData, sampleRate, hopSec) {
     const vocals = normalize(getRMS(vocalsAudio, hopSize));
     const melody = normalize(getRMS(melodyAudio, hopSize));
 
-    // Erweiterte Onset-Betonung für bessere Laser-Schläge
+    // Extra onset emphasis so the lasers hit more decisively
     for (let i = 1; i < drums.length - 1; i++) {
         let diff = drums[i] - drums[i-1];
         if (diff > 0.1) drums[i] = Math.min(1.0, drums[i] + diff * 1.5); // transients pop more
-        else drums[i] *= 0.7; // stärkere Dämpfung für klare Schläge
+        else drums[i] *= 0.7; // damp harder so individual hits stay distinct
     }
     normalize(drums);
     
@@ -132,7 +132,7 @@ function createHeuristicStems(audioData, sampleRate, hopSec) {
     }
     normalize(bass);
 
-    // Vocals glätten
+    // Smooth the vocal envelope
     for (let i = 1; i < vocals.length - 1; i++) {
         vocals[i] = (vocals[i-1] + vocals[i]*2 + vocals[i+1]) / 4;
     }
@@ -158,7 +158,7 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
     if (type === 'init') {
         try {
             self.postMessage({ type: 'progress', message: 'Loading AI Lyrics Model (Whisper)...', percent: 10 });
-            // Wir verwenden das tiny Modell für Schnelligkeit und Zuverlässigkeit im Browser
+            // The tiny model is used for speed and reliability in the browser
             transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
             self.postMessage({ type: 'progress', message: 'AI Models Ready', percent: 100 });
             self.postMessage({ type: 'ready' });

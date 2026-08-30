@@ -1,58 +1,75 @@
 # 🎛️ LaserRave — Real-Time 3D Laser Show Simulator
 
-> A browser-based, audio-reactive 3D laser stage simulator built with Three.js (WebGPU) and the Web Audio API.  
+> A browser-based, audio-reactive 3D laser stage simulator built with Three.js and the Web Audio API.
 > Load your music, hit play, and watch the stage erupt.
 
 ---
 
 ## ⚠️ License & Usage Restrictions
-   IT IS ALL FREE TO USE AND YOU CAN USE IT FOR      ALL THINGS WITH PERMISSION!!
-
 
 This project is **for private / personal use only**.
 
 - ✅ You may run, study, and modify this project for **personal, non-commercial use**.
-- ❌ You may **NOT** use this project, its visuals, recordings, or any derivative works for **commercial purposes**, **public performances**, **social media content** (e.g. TikTok, YouTube, Instagram, Twitch), or **any monetised platform** without **explicit written permission from the author**.
-- ❌ You may **NOT** redistribute or re-publish this project or any part of it without permission.
+- ❌ You may **not** use this project, its visuals, recordings, or any derivative work for **commercial purposes**, **public performances**, **social media content** (TikTok, YouTube, Instagram, Twitch…), or **any monetised platform** without **explicit written permission from the author**.
+- ❌ You may **not** redistribute or re-publish this project or any part of it without permission.
 
-> **To request permission** (e.g. for content creation or live events), open a GitHub Issue or contact the author directly.
+To request permission — for content creation or live events, say — open a GitHub Issue or contact the author directly.
 
 See the [LICENSE](./LICENSE) file for full terms.
 
 ---
 
-
 ## 🎥 See it in Action
 
-Check out videos and photos of the simulator in action on my TikTok:  
-👉 **[@strikerlulu1 on TikTok](https://www.tiktok.com/@strikerlulu1)**
+Videos and photos of the simulator in action are on TikTok:
+👉 **[@strikerlulu1](https://www.tiktok.com/@strikerlulu1)**
+
+---
 
 ## ✨ Features
 
+### Audio & Show Logic
+
 | Feature | Description |
 |---|---|
-| 🎵 **Full Song Analysis** | Uploads are analyzed offline using AI stem separation — bass, drums, melody, and vocals each drive different visual elements. |
-| 🧠 **Musical Structure Analysis** | The AI audio engine analyzes and labels the full song structure: Intro, Verse, Build-up, Drop, and Outro. Each section triggers a different lighting choreography automatically. |
-| ⚡ **Peak Drop Chaos** | When the bass fully drops, lasers go completely wild — rapid wide scatter, strobe flicker, and CO₂ jets fire on the millisecond of the drop. |
-| 🌐 **3D Stage Environment** | Fully rendered truss structure, mirror floor, atmospheric haze/fog — Large Festival or Small Club stage, switchable in real time. |
-| 💡 **180+ Laser Fixtures** | Front, twin, side, surround, corner, aerial and dancefloor formations with zone-aware choreography. |
-| 🤖 **Intelligent Pattern Engine** | Live pattern decider chooses from 14+ choreographic patterns (fan, wave, scatter, tunnel, strobe, salvo, zigzag, chase, sparkle…) based on real-time audio signals. |
-| 🎨 **Color Themes + Video Sync** | Dynamic, RGB, Cyberpunk, Warm, Matrix, and more palettes. Upload a background video and lasers + screens automatically mirror its colors. |
-| 🖥️ **Reactive LED Screens** | Stage screens display uploaded video or pulse with vivid theme colors when no video is loaded. |
-| 💥 **Bloom & Glow (WebGPU)** | Node-based TSL post-processing pipeline — bloom, after-image trail, film grain, and RGB chromatic shift. |
-| 🔥 **Pyrotechnics System** | Curl-noise fluid-dynamics flame and spark particles that burst on song climaxes. *(See Known Issues below)* |
-| 🎬 **TV Mode / Auto-Camera** | Automated cinematic camera cuts and smooth orbit sweeps synced to the beat and section changes. |
-| 🎮 **VJ Camera Drone** | Freely pilotable first-person camera drone with realistic flight physics: inertia, aerodynamic banking on turns, and spring-damping bass shockwave rumble on every kick drum hit. |
-| 🎛️ **Live Control Panel** | Glassmorphism dashboard — adjust intensity, speed, spread, tilt, haze, laser count, beam count, and more on the fly. |
-| 📹 **Video Recording** | Capture the show as a WebM/MKV video directly from the browser at up to 35 Mbps. |
-| 🕹️ **TikTok Mode** | Auto-jumps to the highest energy drop and formats the recording for 9:16 social media. |
-| 🔇 **Auto Blackout** | Lasers and screens fade to black when music is paused or the audio signal drops. |
-| 🔦 **120 Moving Heads** | Instanced beam fixtures with spring-physics pan/tilt, ADSR envelope, and gobo textures. |
-| 🔮 **Live Laser Text & SVG Projection** | Type any text or upload an SVG logo — a dedicated laser array projects it onto the back wall with full galvo-scanner physics simulation (mechanical inertia, corner dwell flicker, beam blanking between letters). |
-| 👥 **Volumetric Crowd Lighting** | When a laser or moving-head beam sweeps over a crowd member, that individual lights up exactly in the beam's color in real time. Overlapping beams blend colors (red + blue = magenta). Smooth glow-trail persistence fades out organically. Togglable in the VJ Console. |
-| 🕺 **Live Crowd Silhouettes** | 180 animated festival crowd members that jump, bounce, and raise their hands in sync with the BPM and song sections. |
-| 🎇 **Up-Lights & Wash Lights** | Stage wash lights react to the mix energy and section type. |
-| 🌫️ **Haze & Fog Jets** | Atmospheric haze and CO₂ cryo-jet simulation that fires on drop events. |
+| 🎵 **Full Song Analysis** | Uploaded tracks are analysed offline with AI stem separation — bass, drums, melody and vocals each drive different visual elements. A fast FFT-only mode is available when you don't want to wait. |
+| 🧠 **Musical Structure Detection** | The analyser labels the song structure — intro, verse, build-up, drop, outro — and each section triggers its own lighting choreography. |
+| ⚡ **Peak Drop Chaos** | When the bass drops, the lasers go wide and erratic, strobes flicker and the CO₂ jets fire on the beat. |
+| 🤖 **Live Pattern Engine** | A pattern decider picks from 14+ choreographies (fan, wave, scatter, tunnel, strobe, salvo, zigzag, chase, sparkle…) from the real-time audio signal. |
+| 🥁 **Manual BPM Tap** | Tap the beat by hand when the automatic detection disagrees with you. |
+
+### Stage & Fixtures
+
+| Feature | Description |
+|---|---|
+| 🏗️ **Custom Stage Builder** | Top-down orthographic editor with a 0.5 m snapping grid. Place trusses, screens, lasers, moving heads, CO₂ jets and up-lights, then compile the layout into a live show. Saved to `localStorage`. |
+| 🏟️ **Four Venue Presets** | Berghain (concrete bunker, dense haze), Open-Air Festival (procedural starfield, grass, rain), Arena (in-the-round, 360° rig, 200-strong crowd) and Basement Club (8×8×3 m, neon signs, max haze). |
+| 💡 **Instanced Laser Fixtures** | Front, twin, side, surround, corner, aerial and dancefloor formations with zone-aware choreography. |
+| 🔦 **Instanced Moving Heads** | Spring-physics pan/tilt with an ADSR envelope and gobo textures. |
+| 🌑 **Real-Time Shadows** | A pool of shadow-casting spotlights is re-aimed each frame at the brightest active heads, so structures block light instead of glowing through it. Resolution scales down automatically when the frame rate drops. |
+| 🎇 **Up-Lights & Wash** | Stage wash lights react to mix energy and section type. |
+| 🔥 **Pyrotechnics** | Curl-noise flame and spark particles, simulated in a Web Worker over `SharedArrayBuffer` so the physics never blocks the render loop. |
+| 🌫️ **Haze & CO₂ Jets** | Volumetric haze plus cryo-jet bursts that fire on drops. |
+| 🌧️ **Weather Effects** | 2,000–8,000 GPU rain streaks with wind drift, floor splash bursts, laser-tinted droplets, and a procedural rain sound synthesised from filtered white noise. |
+| 🕺 **Live Crowd** | Animated festival crowd that jumps and raises hands in time with the BPM and song sections. |
+| 👥 **Volumetric Crowd Lighting** | When a beam sweeps over a crowd member they light up in that beam's exact colour; overlapping beams blend (red + blue = magenta) and fade out on a glow trail. |
+| 🎧 **Procedural DJ Avatar** | Low-poly rig at the booth — head nod on the BPM, arms working the mixer on bass/mid, shoulder bounce on the kick, fist pump on the drop. |
+
+### Camera, Capture & Control
+
+| Feature | Description |
+|---|---|
+| 🎬 **TV Mode / Auto-Camera** | Cinematic cuts and orbit sweeps synced to beats and section changes. |
+| 🎮 **VJ Camera Drone** | Free-flight first-person camera with inertia, aerodynamic banking and spring-damped bass rumble on every kick. |
+| 👤 **Audience POV** | Eye-level camera (1.75 m) attached to a crowd member, with beat-synced head bob, kick shake, and a hop to a new person every fourth beat. Portrait 9:16 supported. |
+| 📸 **Photo Mode** | Freezes the show and audio, gives you a free-look camera with FOV/roll/depth-of-field, six creative filters (Raw, VHS, Film, Analog, Neon, Hologram) and a high-resolution PNG export. |
+| 🎹 **Web MIDI** | Connect a Launchpad, APC40 or any controller. Default CC and note mappings plus an interactive MIDI Learn dialog, persisted to `localStorage`. |
+| 🔮 **Laser Text & SVG Projection** | Type text or upload an SVG and a dedicated array projects it with simulated galvo-scanner physics — mechanical inertia, corner dwell flicker and beam blanking between glyphs. |
+| 🎨 **Colour Themes & Video Sync** | Dynamic, RGB, Cyberpunk, Warm, Matrix and more. Upload a background video and the lasers and screens mirror its colours. |
+| 📹 **Video Recording** | Capture the show as WebM/MKV straight from the browser at up to 35 Mbps. |
+| 🕹️ **TikTok Mode** | Jumps to the highest-energy drop and formats the capture for 9:16, with optional muted export to avoid Content-ID matches. |
+| 📱 **Offline PWA** | Installable web app with a service worker: network-first navigation, cache-first hashed assets, and an offline fallback. |
+| 🌐 **Multiplayer** | Host or join a room over PeerJS to share a session. |
 
 ---
 
@@ -60,94 +77,101 @@ Check out videos and photos of the simulator in action on my TikTok:
 
 | Control | Function |
 |---|---|
-| 🎥 **Auto-Cam** | Automated cinematic camera movement synced to the music |
-| 📺 **TV Mode** | Classic broadcast-style camera cuts between preset angles |
-| 🎮 **Drone Cam** | Fly the camera freely with `W/A/S/D`, `Space/Shift`, arrow keys or mouse drag |
-| 💡 **Heads** | Toggle moving head beam fixtures |
-| 🕺 **Crowd** | Toggle the 180-person animated crowd |
-| 👥 **Dynamic Light** | Switch between volumetric dynamic crowd lighting (beams color individuals) and flat single-color silhouettes (white) |
+| 🎥 **Auto-Cam** | Cinematic camera movement synced to the music |
+| 📺 **TV Mode** | Broadcast-style cuts between preset angles |
+| 🎮 **Drone Cam** | Fly the camera freely |
+| 💡 **Heads** | Toggle moving head fixtures |
+| 🕺 **Crowd** | Toggle the animated crowd |
+| 👥 **Dynamic Light** | Volumetric per-person crowd lighting vs. flat silhouettes |
 | 🎇 **Up-Lights** | Toggle wash up-lights |
 | 🪞 **Bounce** | Ray-bounce reflections off the mirror floor |
-| 📼 **VHS FX** | RGB chromatic shift + film grain post-processing |
-| 🌪️ **Blur FX** | After-image motion blur trail |
-| ✨ **Flares** | Lens flare effects on bright light sources |
-| 🔮 **Laser Writing** | Toggle the galvo-scanner text/SVG laser projector |
+| 📼 **VHS FX** | RGB chromatic shift + film grain |
+| 🌪️ **Blur FX** | After-image motion trail |
+| ✨ **Flares** | Lens flares on bright sources |
+| 🔮 **Laser Writing** | Toggle the galvo-scanner text/SVG projector |
 
-### Drone Cam Controls
+### Keyboard
+
 | Key | Action |
 |---|---|
-| `W / S` | Fly forward / backward |
-| `A / D` | Strafe left / right |
-| `Space` | Fly up |
-| `Shift` | Fly down |
-| `Arrow Keys` | Pan / tilt the camera view |
-| **Mouse Drag** | Look around freely |
+| `Space` | Play / pause |
+| `F` | Fullscreen (or double-click the 3D view) |
+| `C` | Toggle Auto-Cam |
+| `T` | Toggle TV Mode |
+| `H` | Show / hide the UI panels |
+
+### Drone Cam
+
+| Key | Action |
+|---|---|
+| `W` / `S` | Forward / backward |
+| `A` / `D` | Strafe left / right |
+| `Space` | Ascend |
+| `Shift` | Descend |
+| Arrow keys | Pan / tilt |
+| Mouse drag | Look around |
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **[Three.js (WebGPU)](https://threejs.org/)** — 3D rendering, WebGPU renderer, TSL node-based post-processing
-- **[Vite](https://vitejs.dev/)** — lightning-fast dev server & build tool
-- **Web Audio API** — real-time FFT frequency analysis + offline full-song stem analysis
-- **Web Workers** — background AI audio processing without blocking the main thread
-- **Vanilla JavaScript** — no framework overhead, pure ES modules
+- **[Three.js](https://threejs.org/)** (WebGL renderer) — 3D rendering and instanced fixtures
+- **EffectComposer** — bloom, after-image, film grain and RGB shift, with music-reactive bloom strength
+- **[Vite](https://vitejs.dev/)** — dev server and build
+- **Web Audio API** — real-time FFT plus offline full-song stem analysis
+- **Web Workers** — audio analysis and pyro particle physics off the main thread
+- **Web MIDI API** — hardware controller input
+- **Vanilla JavaScript** — no framework, plain ES modules
+
+> **On WebGPU:** earlier versions attempted a WebGPU/TSL post-processing pipeline. It never actually ran — the show is built on raw GLSL `ShaderMaterial` (beams, volumetric haze, fog, LED wall), which `WebGPURenderer` cannot compile, so the code path was disabled by an unconditional `throw` and the renderer always fell back to WebGL. That dead path has been removed and post-processing now runs through `EffectComposer` on WebGL. Porting the shaders to TSL would be a prerequisite for revisiting WebGPU.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) v18 or higher
-- npm (comes with Node.js)
-- A **Chromium-based browser** (Chrome / Edge) for WebGPU support
+
+- [Node.js](https://nodejs.org/) v18 or newer
+- npm (ships with Node.js)
+- A modern browser with WebGL 2 — Chrome or Edge recommended (Web MIDI and file-system recording are Chromium-only)
 
 ### Installation
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/StrikerLUL/LaserRave.git
 cd LaserRave
-
-# 2. Install dependencies
 npm install
-
-# 3. Start the development server
 npm run dev
 ```
 
-> **Windows / PowerShell note:** If you get a script execution error, run:
+Then open the URL shown in the terminal (usually `http://localhost:5173`).
+
+> **Windows / PowerShell:** if you hit a script execution error, run
 > ```powershell
 > Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 > ```
 
-4. Open your browser at the URL shown in the terminal (e.g. `http://localhost:5173`).
+### Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the Vite dev server |
+| `npm run build` | Production build into `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm test` | Run the test suite (Node's built-in test runner) |
 
 ---
 
 ## 🎮 How to Use
 
-1. Click **"🎵 Load Audio (MP3/WAV)"** in the left panel and select any audio file.
-2. Wait for the song analysis to complete (progress bar at the bottom).
+1. Click **🎵 Load Audio (MP3/WAV)** in the left panel and pick a file.
+2. Wait for the analysis to finish (progress bar at the bottom). Tick **⚡ Fast Analysis (No AI)** to skip stem separation.
 3. Hit **▶ Play**.
-4. Optionally upload a background **video** — the screens and lasers will sync to its colors.
-5. **Rotate** the camera by dragging with the mouse. **Scroll** to zoom in/out.
-6. Adjust the control panel in real time:
-   - **Stage** — switch between Large Festival and Small Club
-   - **Formation** — change laser placement (front / sides / surround / corners / aerial…)
-   - **Intensity / Speed / Spread / Angle** — fine-tune the show
-   - **Haze** — atmospheric fog density
-   - **Beams Per Laser** — stack multiple beams per projector
-   - **Color Theme** — switch palettes instantly
-   - **FX** — toggle Bloom trail, VHS/Film grain, Lens flares
-7. Use **Auto-Cam**, **TV Mode**, or **Drone Cam** for camera control.
-8. Click **🔴 Record Video** to capture a WebM export.
-9. **Keyboard Shortcuts:**
-   - `Space`: Toggle Play/Pause
-   - `F`: Toggle Fullscreen (or double-click the 3D view)
-   - `C`: Toggle Auto-Cam
-   - `T`: Toggle TV Mode
-   - `H`: Toggle UI Panel Visibility
+4. Optionally upload a background **video** — screens and lasers will follow its colours.
+5. Drag to orbit the camera, scroll to zoom.
+6. Tune the show live: stage size, formation, intensity, speed, spread, angle, haze, beams per laser, colour theme, FX toggles.
+7. Switch camera with **Auto-Cam**, **TV Mode**, **Drone Cam** or **Audience POV**.
+8. Hit **🔴 Record Video** to capture, or open **Photo Mode** for a still.
 
 ---
 
@@ -155,53 +179,103 @@ npm run dev
 
 ```
 LaserRave/
-├── index.html          # App entry point & UI layout
+├── index.html              # App entry point and UI layout
 ├── src/
-│   ├── main.js         # Core simulator orchestrator
-│   ├── config.js       # Central configuration and Laser Presets
-│   ├── PostProcessing.js # TSL Node-based Bloom, VHS, Film Post-FX
-│   ├── AudioProcessor.js # Web Audio API processing module
-│   ├── LaserEngine.js  # Laser generation and choreography module
-│   ├── CameraManager.js # TV Mode and Drone Camera module
-│   ├── UIManager.js    # DOM event listeners and UI module
-│   ├── style.css       # Glassmorphism UI styles
-│   ├── ai-worker.js    # Background audio-analysis / stem-separation worker
-│   └── pyro-worker.js  # Pyrotechnics particle physics worker
+│   ├── main.js             # Simulator core: render loop, fixtures, camera, UI wiring
+│   ├── config.js           # Global parameters, presets, colour themes
+│   ├── State.js            # Runtime state store
+│   ├── StageBuilder.js     # Builder maths, schema, serialisation, compilation
+│   ├── StagePresets.js     # The four venue presets and their procedural props
+│   ├── WeatherEffects.js   # Rain physics, splashes, laser reflections
+│   ├── AudiencePOV.js      # Crowd-level camera, head bob, hop transitions
+│   ├── PhotoMode.js        # Freeze-frame, free-look camera, filters, PNG export
+│   ├── DJAvatar.js         # Procedural DJ rig and audio-reactive animation
+│   ├── MIDIController.js   # Web MIDI access, mappings, MIDI Learn
+│   ├── AudioProcessor.js   # Web Audio graph and procedural rain synth
+│   ├── LaserEngine.js      # Laser generation and choreography
+│   ├── NewFixtures.js      # Additional fixture types
+│   ├── Multiplayer.js      # PeerJS session sharing
+│   ├── PWA.js              # Service worker registration and manifest validation
+│   ├── ai-worker.js        # Stem separation / structure analysis worker
+│   ├── pyro-worker.js      # Pyro particle physics worker
+│   └── style.css           # Glassmorphism UI styles
+│
+│   # Currently unreferenced — kept for reference, not part of the build:
+│   ├── PostProcessing.js   # Old WebGPU/TSL post chain, superseded by EffectComposer
+│   ├── UIManager.js        # Superseded once main.js absorbed the UI wiring
+│   ├── CameraManager.js
+│   └── LaserFont.js
 ├── public/
-│   ├── favicon.svg
-│   └── icons.svg
-├── tests/              # Node.js unit tests
-├── package.json
-└── README.md
+│   ├── manifest.json       # Web app manifest
+│   ├── sw.js               # Service worker
+│   └── icons/              # PWA icons
+├── tests/                  # Test suite (node --test)
+├── vite.config.js
+└── package.json
 ```
 
-> **Note:** The `songs/` directory (personal audio files), `node_modules/`, and debug screenshots are intentionally excluded from this repository.
+> `songs/` (personal audio), `node_modules/`, `dist/` and local scratch files are excluded from the repository.
 
 ---
 
-## 🐛 Known Issues
+## 🧪 Tests
 
-### 🔥 Pyrotechnics System
-The pyrotechnics system (flames and spark bursts) has been deeply optimized using **SharedArrayBuffer** and Web Workers. The curl-noise fluid dynamics and particle updates now calculate completely off the main thread with zero-copy memory transfers, guaranteeing a stable 60 FPS even during massive drops.
+```bash
+npm test
+```
+
+The suite runs on Node's built-in test runner and covers the stage builder, venue presets, weather effects, audience POV, photo mode, DJ avatar, MIDI controller, the real service worker, and cross-feature scenarios.
+
+Tests import the modules under `src/` directly. Several suites previously carried a private copy of the implementation inside the test file and asserted against that copy, which meant they stayed green no matter what the shipped code did; those have been rewired to the real modules. `tests/serviceWorker.real.test.js` goes further and executes the actual `public/sw.js` inside a service-worker-shaped sandbox.
 
 ---
 
-## 🔮 Planned Features
+## 🔧 Debug Handle
 
-- Fix & complete the Pyrotechnics system (see Known Issues above)
-- MIDI controller support for live VJ performance
-- Multiple export formats (MP4 H.264)
-- DMX/Art-Net output for real hardware fixtures
-- Beat grid editor for manual BPM correction
-- Crowd density and position editor
+The app exposes a small read-mostly handle on `window` for performance work. In the browser console:
+
+```js
+__laserrave.info              // draw calls, triangles, programs, geometries, textures
+__laserrave.fps               // smoothed frame rate
+__laserrave.shadows           // shadow state: enabled, map size, casters in use
+__laserrave.setShadows(false) // A/B shadow cost in a single session
+__laserrave.setBeamBrightness(1.4) // live trim for additive beam brightness
+```
+
+`renderer.info` resets itself on every `render()` call, and the post chain issues several per frame — so the renderer is put into manual reset mode and cleared once per frame. Without that, the counters only ever report the last fullscreen pass.
+
+---
+
+## 🐛 Notes & Known Limitations
+
+- **Crowd rendering** — the crowd is currently one `THREE.Mesh` per person with two cloned materials each. At the Arena preset's 200 people that is 200 draw calls and 400 material instances, and it is the largest remaining performance item. Converting it to a single `InstancedMesh` is the planned fix.
+- **Crowd shadows** — crowd members use `MeshBasicMaterial`, which ignores lighting entirely, so `receiveShadow` has no effect on them yet. The flag is already set so they start receiving as soon as the material changes.
+- **Floor albedo** — the floor is nearly black (`0x050505`), so shadow-cast light pools barely register on it. Lifting the albedo makes them visible but changes the overall look, so it has been left as an explicit choice.
+- **Unreferenced modules** — `PostProcessing.js`, `UIManager.js`, `CameraManager.js` and `LaserFont.js` are no longer imported by anything. They are left in place for reference but are not part of the build; `PostProcessing.js` in particular is the old TSL pipeline and would pull `three/tsl` back in if it were ever wired up again.
+- **AI analysis payload** — the ONNX runtime WASM used by the stem separator is around 22 MB. It ships with the build even though **Fast Analysis** is the default; making it a genuine lazy load is planned.
+
+---
+
+## 🔮 Planned
+
+- Anamorphic lens flares and streaks
+- Depth-aware soft beams (no hard intersection edges with geometry)
+- Volumetric raymarched haze
+- Real fixture profiles with motor inertia (°/s limits)
+- Beam occlusion against stage geometry
+- DMX / Art-Net output for real hardware
+- Microphone / line-in live input
+- Cue list and scene stack for live operation
+- Offline 4K render with accumulated motion blur
+- WebXR (VR) mode
 
 ---
 
 ## 👤 Author
 
-**StrikerLUL**  
+**StrikerLUL**
 GitHub: [@StrikerLUL](https://github.com/StrikerLUL)
 
 ---
 
-*© 2025 StrikerLUL — All rights reserved. Private use only. See LICENSE for full terms.*
+*© 2025 StrikerLUL — All rights reserved. Private use only. See [LICENSE](./LICENSE) for full terms.*

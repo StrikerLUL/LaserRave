@@ -54,3 +54,24 @@ Zukunfts_Ideen.md
 *.njsproj
 *.sln
 *.sw?
+
+# ── Legacy working copies of main.js (superseded, kept locally only) ──
+main_head.js
+original_main.js
+original_main_temp.js
+diff_main.txt
+deleted_listeners.txt
+src/main_backup.js
+
+# ── Local debug/scratch helpers ──
+check_console.js
+test_ui.js
+scratch/
+
+# ── Internal agent orchestration artifacts (not part of the product) ──
+.agents/
+BRIEFING.md
+ORIGINAL_REQUEST.md
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md

@@ -1,19 +1,113 @@
 import { CFG } from './config.js';
 import { computeFormation } from './utils/computeFormation.js';
 import * as THREE from 'three';
-import { pass, uniform, texture, uv, vec4, vec2, length, smoothstep, color as tslColor, positionLocal } from 'three/tsl';
-import { PointsNodeMaterial } from 'three/webgpu';
-import { WebGPURenderer, RenderPipeline } from 'three/webgpu';
-import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
-import { afterImage } from 'three/examples/jsm/tsl/display/AfterImageNode.js';
-import { film } from 'three/examples/jsm/tsl/display/FilmNode.js';
-import { rgbShift } from 'three/examples/jsm/tsl/display/RGBShiftNode.js';
+// NOTE: this project renders with THREE.WebGLRenderer, not WebGPURenderer.
+// The show is built on raw GLSL ShaderMaterial (laser beams, volumetric haze,
+// fog, LED wall), which WebGPURenderer cannot compile — it needs TSL node
+// materials. The former WebGPU/TSL post-processing path was therefore disabled
+// by an unconditional `throw` and never executed a single time; it has been
+// removed along with the `three/tsl` + `three/webgpu` imports it pulled into the
+// bundle. Post-processing now runs through EffectComposer (imported below).
 
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+
+// WebGL post-processing chain. The TSL/WebGPU pipeline above only runs when a real
+// WebGPU backend is available; on the WebGL fallback (which is what virtually every
+// browser actually takes today) these give us the same look.
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
+import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { RGBShiftShader } from 'three/examples/jsm/shaders/RGBShiftShader.js';
+import { Multiplayer } from './Multiplayer.js';
+import { FixtureManager } from './NewFixtures.js';
 // Removed Reflector due to WebGPU incompatibility
 
 import { computeFormationPositions } from './utils/formations.js';
+import { LaserEngine, aimAtTarget } from './LaserEngine.js';
+
+import {
+    snapToGrid,
+    snapVector3,
+    normalizeYaw,
+    clampToBounds,
+    validateFixture,
+    serializeStageLayout,
+    deserializeStageLayout,
+    saveLayoutToStorage,
+    loadLayoutFromStorage,
+    compileCustomStageLayout,
+    getTemplateLayout,
+    STAGE_BUILDER_CONFIG
+} from './StageBuilder.js';
+
+import {
+    STAGE_PRESETS,
+    getStagePreset,
+    generateConcentricCrowd,
+    generateCompactDancefloor,
+    applyStagePreset,
+    createProceduralStarfield,
+    createProceduralGrassTexture,
+    createNeonSign
+} from './StagePresets.js';
+
+import {
+    WEATHER_CONFIG,
+    createRainParticleSystem,
+    updateRainParticles,
+    emitSplashBurst,
+    calculateLaserRainReflection,
+    calculateRainAudioGain,
+    createRainStreakTexture
+} from './WeatherEffects.js';
+import { ProceduralRainSynth } from './AudioProcessor.js';
+
+import {
+    POV_CONFIG,
+    AUDIENCE_POV_CONFIG,
+    getAudienceBasePosition,
+    calculateLookAtYaw,
+    calculateHeadBob,
+    calculateKickShake,
+    interpolateCrowdHop,
+    calculatePortraitVFOV,
+    evaluateAudiencePOVCamera
+} from './AudiencePOV.js';
+
+import {
+    PHOTO_MODE_CONFIG,
+    PHOTO_FILTERS,
+    PhotoModeManager,
+    getFilterShaderConfig,
+    generatePhotoFilename,
+    clampFreecamParams,
+    applyPhotoFilter
+} from './PhotoMode.js';
+
+import {
+    DJ_CONFIG,
+    createDJAvatarMesh,
+    updateDJAvatar
+} from './DJAvatar.js';
+
+import {
+    MIDI_CONFIG,
+    MIDIManager,
+    parseMIDIMessage,
+    dispatchMIDIEvent
+} from './MIDIController.js';
+
+import {
+    PWA_CONFIG,
+    registerServiceWorker
+} from './PWA.js';
+
+
+
 
 // Procedural Lens Flare Texture Generator
 function createFlareTexture() {
@@ -146,6 +240,13 @@ const _lookTarget = new THREE.Vector3();
 
 let currentMode = 'live'; // 'live' or 'studio'
 let selectedLaser = null;
+export let selectedLasers = []; // Multi-selection
+export let isTargetingMode = false;
+export function setTargetingMode(val) { isTargetingMode = val; }
+const boxHelpers = new Map(); // Store BoxHelpers for highlighted lasers
+window.mpSystem = null;
+let mpBroadcastTimer = null;
+let newFixtures = null;
 
 // ── Timeline & Projection State ──
 const timelineData = {
@@ -179,40 +280,21 @@ let variationPhase    = 0;  // micro-variation index (0–3), changes every 16 b
 const W = window.innerWidth, H = window.innerHeight;
 
 let renderer;
-let isWebGPU = false; // track if we have real WebGPU for TSL postProcessing
 try {
-  try {
-    throw new Error("Force WebGL Fallback to support ShaderMaterial");
-    renderer = new WebGPURenderer({ forceWebGL: true,
-      antialias: true,
-      powerPreference: "high-performance"
-    });
-    isWebGPU = true;
-    console.log('WebGPURenderer initialized successfully');
-  } catch (e) {
-    console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
-    try {
-      renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        powerPreference: "high-performance"
-      });
-      isWebGPU = false;
-      console.log('WebGLRenderer initialized successfully');
-    } catch (webglErr) {
-      console.error("WebGLRenderer init failed", webglErr);
-      throw webglErr;
-    }
-  }
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    powerPreference: "high-performance"
+  });
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  // Only disable built-in tone mapping when WebGPU handles it via TSL pipeline;
-  // for WebGL fallback keep ACESFilmic so colors look correct.
-  if (isWebGPU) {
-    renderer.toneMapping = THREE.NoToneMapping;
-  } else {
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
-  }
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+  renderer.shadowMap.enabled = true;
+  // PCFSoftShadowMap is deprecated as of three r183 and silently falls back to
+  // PCFShadowMap while logging a warning on every load. Ask for what we actually
+  // get; the softness now comes from the radius set on each light's shadow.
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  console.log('WebGLRenderer initialized successfully');
   document.getElementById('canvas-container').appendChild(renderer.domElement);
 } catch (e) {
   console.error("Critical renderer initialization error:", e);
@@ -227,7 +309,7 @@ try {
   fallbackDiv.style.borderRadius = '10px';
   fallbackDiv.style.fontFamily = 'sans-serif';
   fallbackDiv.style.zIndex = '9999';
-  fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
+  fallbackDiv.innerHTML = '<h3>WebGL Error</h3><p>Sorry, your browser or device does not support the WebGL rendering required by this application.</p>';
   document.body.appendChild(fallbackDiv);
 
   // Mock renderer to prevent immediate downstream TypeError crashes
@@ -246,8 +328,10 @@ try {
         captureStream: () => new MediaStream()
     })
   };
-  isWebGPU = false;
 }
+
+// ─── Audio Core Globals (Declared early to prevent TDZ ReferenceError) ───
+let audioCtx = null, analyser = null, dataArray = null, source = null, audioBuffer = null;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
@@ -277,6 +361,29 @@ const droneShakeRot = new THREE.Vector2(); // x: pitch shake, y: yaw shake
 const droneShakeRotVel = new THREE.Vector2();
 let lastDronePostState = false;
 
+// ─── Audience POV Camera Mode State (R4) ──────────────────────
+let crowdPOVEnabled = false;
+let povCurrentCrowdIdx = 0;
+let povTargetCrowdIdx = 0;
+let povHopElapsed = 0.6; // initial hop complete
+let povHopActive = false;
+let povBeatCount = 0;
+let povKickElapsed = 1.0;
+let povYawVarianceDeg = 0.0;
+let povTargetYawVarianceDeg = 0.0;
+
+// ─── Photo Mode State (R5) ───────────────────────────────────
+const photoModeManager = new PhotoModeManager();
+let rawSnapshotCanvas = null;
+
+// ─── 3D DJ Avatar State (R6) ─────────────────────────────────
+let djAvatarRig = null;
+let djAvatarEnabled = true;
+
+// ─── Web MIDI Controller State (R7) ──────────────────────────
+const midiManager = new MIDIManager(typeof window !== 'undefined' ? window.localStorage : null);
+let isMidiModalOpen = false;
+
 // ─── Laser Writer (Vector Projection Scanner) Globals ───────
 let laserWriterEnabled = false;
 let laserWriterMode = 'text';
@@ -305,6 +412,218 @@ let laserWriterGroup = null;
 let projectionLineMesh = null;
 let projectorRayMesh = null;
 let projectorRayCoreMesh = null;
+
+// ── Weather & Rain Particle System Globals (R3) ───────────────
+let rainSystem = null;
+let rainPoints = null;
+let rainGeometry = null;
+let rainPosAttr = null;
+let rainColAttr = null;
+
+let splashPoints = null;
+let splashGeometry = null;
+let splashPosAttr = null;
+let splashColAttr = null;
+
+let rainEnabled = false;
+let rainIntensity = 4000;
+let rainStreakTex = null;
+const rainAudioSynth = new ProceduralRainSynth();
+
+function initRainParticleSystem(intensity = 4000) {
+    if (rainPoints) {
+        scene.remove(rainPoints);
+        if (rainGeometry) rainGeometry.dispose();
+    }
+    if (splashPoints) {
+        scene.remove(splashPoints);
+        if (splashGeometry) splashGeometry.dispose();
+    }
+
+    rainIntensity = intensity;
+    rainSystem = createRainParticleSystem(rainIntensity);
+
+    if (!rainStreakTex) {
+        rainStreakTex = createRainStreakTexture();
+    }
+
+    // Rain points geometry
+    rainGeometry = new THREE.BufferGeometry();
+    rainPosAttr = new THREE.BufferAttribute(rainSystem.positions, 3);
+    rainGeometry.setAttribute('position', rainPosAttr);
+
+    const colorFloats = new Float32Array(rainSystem.count * 3);
+    for (let i = 0; i < rainSystem.count; i++) {
+        colorFloats[i * 3]     = 0.533; // 0x88
+        colorFloats[i * 3 + 1] = 0.733; // 0xbb
+        colorFloats[i * 3 + 2] = 1.000; // 0xff
+    }
+    rainColAttr = new THREE.BufferAttribute(colorFloats, 3);
+    rainGeometry.setAttribute('color', rainColAttr);
+
+    const rainMat = new THREE.PointsMaterial({
+        size: 1.8,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.75,
+        map: rainStreakTex,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+
+    rainPoints = new THREE.Points(rainGeometry, rainMat);
+    rainPoints.visible = rainEnabled;
+    scene.add(rainPoints);
+
+    // Splash points pool (max 250 particles)
+    const maxSplashCount = 250;
+    const splashPositions = new Float32Array(maxSplashCount * 3);
+    const splashColors = new Float32Array(maxSplashCount * 3);
+    splashGeometry = new THREE.BufferGeometry();
+    splashPosAttr = new THREE.BufferAttribute(splashPositions, 3);
+    splashColAttr = new THREE.BufferAttribute(splashColors, 3);
+    splashGeometry.setAttribute('position', splashPosAttr);
+    splashGeometry.setAttribute('color', splashColAttr);
+
+    const splashMat = new THREE.PointsMaterial({
+        size: 0.6,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+
+    splashPoints = new THREE.Points(splashGeometry, splashMat);
+    splashPoints.visible = rainEnabled;
+    scene.add(splashPoints);
+}
+
+function updateRainVisuals(dt) {
+    if (!rainEnabled || !rainSystem || dt <= 0) {
+        if (rainPoints) rainPoints.visible = false;
+        if (splashPoints) splashPoints.visible = false;
+        return;
+    }
+    rainPoints.visible = true;
+    splashPoints.visible = true;
+
+    // Wind drift configuration
+    const windX = CFG.windX !== undefined ? (CFG.windX * 0.1) : 0.5;
+    const impacts = updateRainParticles(rainSystem, dt, { x: windX, z: -0.2 });
+
+    // Emit floor splashes upon impact
+    const maxImpactsToProcess = Math.min(impacts.length, 12);
+    for (let i = 0; i < maxImpactsToProcess; i++) {
+        emitSplashBurst(rainSystem, impacts[i], Math.floor(3 + Math.random() * 3));
+    }
+
+    // Collect active laser beams for proximity coloring
+    const activeLaserBeams = [];
+    for (let b = 0; b < activeBeams.length; b++) {
+        const bm = activeBeams[b];
+        if (bm && bm.pos && bm.dir) {
+            activeLaserBeams.push({
+                active: true,
+                start: bm.pos,
+                end: {
+                    x: bm.pos.x + bm.dir.x * 50.0,
+                    y: bm.pos.y + bm.dir.y * 50.0,
+                    z: bm.pos.z + bm.dir.z * 50.0
+                },
+                color: bm.color
+            });
+        }
+    }
+
+    // Laser proximity reflection check & color update
+    const colors = rainColAttr.array;
+    const pos = rainSystem.positions;
+    const count = rainSystem.count;
+    const tempP = { x: 0, y: 0, z: 0 };
+    const tempCol = new THREE.Color();
+
+    for (let i = 0; i < count; i++) {
+        const i3 = i * 3;
+        tempP.x = pos[i3];
+        tempP.y = pos[i3 + 1];
+        tempP.z = pos[i3 + 2];
+
+        if (activeLaserBeams.length > 0) {
+            const ref = calculateLaserRainReflection(tempP, activeLaserBeams, 0.8);
+            if (ref.isReflected) {
+                tempCol.set(ref.color);
+                colors[i3]     = tempCol.r;
+                colors[i3 + 1] = tempCol.g;
+                colors[i3 + 2] = tempCol.b;
+                continue;
+            }
+        }
+        // Default rain color (0x88bbff)
+        colors[i3]     = 0.533;
+        colors[i3 + 1] = 0.733;
+        colors[i3 + 2] = 1.000;
+    }
+
+    rainPosAttr.needsUpdate = true;
+    rainColAttr.needsUpdate = true;
+
+    // Update Splash Geometry Pool
+    const sPos = splashPosAttr.array;
+    const sCol = splashColAttr.array;
+    let sIdx = 0;
+
+    for (let b = 0; b < rainSystem.activeSplashes.length && sIdx < 250; b++) {
+        const burst = rainSystem.activeSplashes[b];
+        for (let p = 0; p < burst.particles.length && sIdx < 250; p++) {
+            const pt = burst.particles[p];
+            const p3 = sIdx * 3;
+            sPos[p3]     = pt.x;
+            sPos[p3 + 1] = pt.y;
+            sPos[p3 + 2] = pt.z;
+            sCol[p3]     = 0.7 * pt.alpha;
+            sCol[p3 + 1] = 0.9 * pt.alpha;
+            sCol[p3 + 2] = 1.0 * pt.alpha;
+            sIdx++;
+        }
+    }
+    // Clear unused slots
+    for (let k = sIdx; k < 250; k++) {
+        const k3 = k * 3;
+        sPos[k3 + 1] = -100;
+    }
+    splashPosAttr.needsUpdate = true;
+    splashColAttr.needsUpdate = true;
+}
+
+function setRainState(enabled, intensity = rainIntensity) {
+    rainEnabled = enabled;
+    rainIntensity = intensity;
+
+    const chk = document.getElementById('param-weather-rain');
+    if (chk) chk.checked = enabled;
+    const sld = document.getElementById('param-rain-intensity');
+    if (sld) sld.value = intensity;
+    const val = document.getElementById('val-rain-intensity');
+    if (val) val.textContent = intensity;
+
+    if (enabled) {
+        if (!rainSystem || rainSystem.count !== intensity) {
+            initRainParticleSystem(intensity);
+        }
+        if (rainPoints) rainPoints.visible = true;
+        if (splashPoints) splashPoints.visible = true;
+        if (audioCtx) {
+            rainAudioSynth.init(audioCtx);
+            rainAudioSynth.start(intensity);
+        }
+    } else {
+        if (rainPoints) rainPoints.visible = false;
+        if (splashPoints) splashPoints.visible = false;
+        rainAudioSynth.stop();
+    }
+}
+
 
 const LASER_FONT = {
   'A': [[[0,0],[0,0.6],[0.5,1],[1,0.6],[1,0]], [[0,0.4],[1,0.4]]],
@@ -403,17 +722,6 @@ controls.target.set(0, 5, 0);
 controls.minDistance = 5;
 controls.maxDistance = 80;
 
-// TransformControls for Studio Mode
-const transformControl = new TransformControls(camera, renderer.domElement);
-transformControl.addEventListener('dragging-changed', function (event) {
-  controls.enabled = !event.value; // Disable orbit when dragging
-});
-if (transformControl.getHelper) {
-    scene.add(transformControl.getHelper());
-} else if (transformControl instanceof THREE.Object3D) {
-    scene.add(transformControl);
-}
-
 // Raycaster
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -422,37 +730,129 @@ const mouse = new THREE.Vector2();
 // ─── Post-Processing (TSL Node-based) ────────
 let fxBlurEnabled = false;
 let fxVhsEnabled = false;
-let raybounceEnabled = false;
+let fxFlareEnabled = false;
+let fxDofEnabled = false;
+    let raybounceEnabled = false;
 
-// These TSL nodes MUST be created AFTER renderer.init() — they are set up in the async
-// init block below. Declared here so rebuildPostChain() and the animate loop can reference them.
-let scenePass = null;
-let sceneColor = null;
-let bloomNode  = null;
-let postProcessing = null;
+// Uniform holders for the VHS/blur controls. These used to be TSL uniform() nodes;
+// they are plain boxes now and are mirrored onto the EffectComposer passes.
+const afterImageDamp  = { value: 0.88 };
+const filmTimeUniform = { value: 0.0 };
+const rgbShiftAmount  = { value: 0.0015 };
 
-// Uniforms for VHS/blur controls (safe to create before init)
-const afterImageDamp  = uniform(0.88);
-const filmTimeUniform = uniform(0.0);
-const rgbShiftAmount  = uniform(0.0015);
+// ── WebGL EffectComposer chain (the path that actually runs) ─────────────────
+let glComposer     = null;
+let glRenderPass   = null;
+let glBloomPass    = null;
+let glAfterimage   = null;
+let glFilmPass     = null;
+let glRgbShiftPass = null;
+let glOutputPass   = null;
+// The scene is already full of additive-blended beams, so bloom only needs to
+// pick up the genuinely hot pixels (laser cores, LED wall, strobes). A low
+// threshold here blooms the whole stage into a white blob.
+let glBloomStrength = 0.55;   // base strength; modulated per-frame by the music
+const GL_BLOOM_RADIUS    = 0.5;
+const GL_BLOOM_THRESHOLD = 0.55;
+
+/**
+ * Builds the WebGL post chain. Order matters: bloom has to see the raw HDR-ish
+ * scene, the grain/shift artefacts go on top of it, and OutputPass does the
+ * tone mapping + sRGB conversion last.
+ */
+function initGLComposer() {
+    if (!renderer || !renderer.domElement || typeof renderer.getSize !== 'function') return;
+    try {
+        disposeGLComposer();
+        const size = renderer.getSize(new THREE.Vector2());
+        glComposer = new EffectComposer(renderer);
+        glComposer.setPixelRatio(renderer.getPixelRatio ? renderer.getPixelRatio() : 1);
+        glComposer.setSize(size.x, size.y);
+
+        glRenderPass = new RenderPass(scene, camera);
+        glComposer.addPass(glRenderPass);
+
+        glBloomPass = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), glBloomStrength, GL_BLOOM_RADIUS, GL_BLOOM_THRESHOLD);
+        glComposer.addPass(glBloomPass);
+
+        glAfterimage = new AfterimagePass(0.88);
+        glAfterimage.enabled = false;
+        glComposer.addPass(glAfterimage);
+
+        glFilmPass = new FilmPass(0.35, false);
+        glFilmPass.enabled = false;
+        glComposer.addPass(glFilmPass);
+
+        glRgbShiftPass = new ShaderPass(RGBShiftShader);
+        glRgbShiftPass.uniforms.amount.value = 0.0015;
+        glRgbShiftPass.enabled = false;
+        glComposer.addPass(glRgbShiftPass);
+
+        // OutputPass reads renderer.toneMapping / outputColorSpace and applies them in
+        // its shader. WebGLRenderer skips tone mapping when drawing into a render
+        // target, so this is the only place it happens — it must stay ACESFilmic or
+        // the HDR values clip straight to white.
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+        glOutputPass = new OutputPass();
+        glComposer.addPass(glOutputPass);
+
+        console.log('WebGL post-processing (bloom) initialized');
+    } catch (e) {
+        console.warn('WebGL post-processing setup failed, rendering without bloom:', e);
+        disposeGLComposer();
+    }
+}
+
+function disposeGLComposer() {
+    if (glComposer) {
+        try {
+            glComposer.passes.forEach(pass => { if (typeof pass.dispose === 'function') pass.dispose(); });
+            if (typeof glComposer.dispose === 'function') glComposer.dispose();
+        } catch (e) { /* renderer may already be gone */ }
+    }
+    glComposer = glRenderPass = glBloomPass = glAfterimage = glFilmPass = glRgbShiftPass = glOutputPass = null;
+}
 
 // Proxy compat objects so legacy code that references filmPass.enabled etc still works
 const afterimagePass = { enabled: false };
 const filmPass     = { enabled: false, uniforms: { time: { get value() { return filmTimeUniform.value; }, set value(v) { filmTimeUniform.value = v; } } } };
 const rgbShiftPass = { enabled: false, uniforms: { amount: { get value() { return rgbShiftAmount.value; }, set value(v) { rgbShiftAmount.value = v; } } } };
 
-// Rebuilds the TSL output chain to include only the active effects
-function rebuildPostChain() {
-    if (!postProcessing || !sceneColor || !bloomNode) return;
-    try {
-        let chain = sceneColor.add(bloomNode);
-        if (fxBlurEnabled)  chain = afterImage(chain, afterImageDamp);
-        if (fxVhsEnabled)   chain = rgbShift(film(chain, filmTimeUniform, 0.35, 648), rgbShiftAmount);
-        postProcessing.outputNode = chain.toneMapping(THREE.NeutralToneMapping);
-        postProcessing.needsUpdate = true;
-    } catch (e) {
-        console.warn("Failed to rebuild post processing chain", e);
+function syncScreenFxStyles() {
+    if (!renderer || !renderer.domElement || !renderer.domElement.style) return;
+
+    // When a real post chain is active, afterimage/grain/shift are rendered by the
+    // GPU passes — stacking a CSS blur + hue-rotate on top of that just smears the
+    // image and costs an extra full-screen composite. Only DoF has no pass.
+    const hasRealChain = !!glComposer;
+    const blurAmount = (fxBlurEnabled && !hasRealChain) ? 1.0 : 0;
+    const dofAmount = fxDofEnabled ? 1.2 : 0;
+    const vhsHue = (fxVhsEnabled && !hasRealChain) ? (Math.sin(filmTimeUniform.value * 3.0) * 2.0) : 0;
+
+    if (!blurAmount && !dofAmount && !vhsHue && !(fxVhsEnabled && !hasRealChain)) {
+        renderer.domElement.style.filter = '';
+        return;
     }
+
+    const filters = [];
+    if (blurAmount > 0) filters.push(`blur(${blurAmount}px)`);
+    if (dofAmount > 0) filters.push(`blur(${dofAmount}px)`);
+    if (fxVhsEnabled && !hasRealChain) {
+        filters.push('contrast(1.12) saturate(1.22) brightness(1.03)');
+        filters.push(`hue-rotate(${vhsHue}deg)`);
+    }
+    renderer.domElement.style.filter = filters.join(' ');
+}
+// Rebuilds the output chain to include only the active effects
+function rebuildPostChain() {
+    // WebGL path: passes are pre-built, we just toggle them.
+    if (glComposer) {
+        if (glAfterimage)   glAfterimage.enabled   = fxBlurEnabled;
+        if (glFilmPass)     glFilmPass.enabled     = fxVhsEnabled;
+        if (glRgbShiftPass) glRgbShiftPass.enabled = fxVhsEnabled || droneEnabled;
+    }
+    syncScreenFxStyles();
 }
 
 // ─────────────────────────────────────────────
@@ -536,135 +936,13 @@ function addScreen(w, h, x, y, z, ry=0) {
     return s;
 }
 
-function buildStageEnvironment() {
-    // Clear old stage
-    while(stageGroup.children.length > 0){ 
-        const child = stageGroup.children[0];
-        stageGroup.remove(child); 
-    }
-    screenMeshes.length = 0;
-    stageBuildQueue.length = 0;
+const ambientLight = new THREE.AmbientLight(0x334466, 1.2);
+scene.add(ambientLight);
 
-    if (CFG.stageSize === 'large') {
-        // Horizontal Main Trusses (Multiple layers)
-        stageBuildQueue.push(() => createTruss(120, 0.4, 0.4, 0, 18, -25));
-        stageBuildQueue.push(() => createTruss(120, 0.4, 0.4, 0, 14, -20));
-        stageBuildQueue.push(() => createTruss(120, 0.4, 0.4, 0, 10, -15));
-        
-        // Vertical Supports
-        for (let x of [-45, -25, 0, 25, 45]) {
-            stageBuildQueue.push(() => createTruss(0.3, 20, 0.3, x, 10, -25));
-        }
-        
-        // Side "Wings" Trusses (Angled)
-        stageBuildQueue.push(() => createTruss(40, 0.4, 0.4, -60, 12, -10, 0, Math.PI / 4, 0));
-        stageBuildQueue.push(() => createTruss(40, 0.4, 0.4, 60, 12, -10, 0, -Math.PI / 4, 0));
-
-        stageBuildQueue.push(() => {
-            backWall = new THREE.Mesh(
-              new THREE.PlaneGeometry(250, 60),
-              new THREE.MeshStandardMaterial({ color: 0x05050a, roughness: 1.0 })
-            );
-            backWall.position.set(0, 30, -50);
-            stageGroup.add(backWall);
-        });
-
-        // Center Massive Wall
-        stageBuildQueue.push(() => addScreen(30, 15, 0, 7.5, -30));
-        
-        // Side Wings (Towers)
-        for (let i = 0; i < 3; i++) {
-            const xOff = 25 + i * 15;
-            const zPos = -25 + i * 5;
-            const ry = -Math.PI / 8 * (i + 1);
-            stageBuildQueue.push(() => addScreen(8, 20, -xOff, 10, zPos, -ry));
-            stageBuildQueue.push(() => addScreen(8, 20, xOff, 10, zPos, ry));
-        }
-        
-        // DJ Booth Screens
-        stageBuildQueue.push(() => addScreen(8, 4, 0, 2, -15));
-        
-        // Massive PA Wall
-        const paMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
-        for (let side of [-1, 1]) {
-          for (let column = 0; column < 2; column++) {
-            stageBuildQueue.push(() => {
-                const paGroup = new THREE.Group();
-                paGroup.position.set(side * (18 + column * 4), 0, -28);
-                for (let i = 0; i < 6; i++) {
-                  const box = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.5), paMat);
-                  box.position.y = 1 + i * 2.1;
-                  paGroup.add(box);
-                }
-                stageGroup.add(paGroup);
-            });
-          }
-        }
-    } else {
-        // SMALL STAGE
-        // Single back truss
-        stageBuildQueue.push(() => createTruss(40, 0.4, 0.4, 0, 10, -10));
-        // Vertical Supports
-        for (let x of [-18, 18]) {
-            stageBuildQueue.push(() => createTruss(0.3, 10, 0.3, x, 5, -10));
-        }
-
-        stageBuildQueue.push(() => {
-            backWall = new THREE.Mesh(
-              new THREE.PlaneGeometry(80, 30),
-              new THREE.MeshStandardMaterial({ color: 0x05050a, roughness: 1.0 })
-            );
-            backWall.position.set(0, 15, -15);
-            stageGroup.add(backWall);
-        });
-
-        // Single smaller screen behind DJ
-        stageBuildQueue.push(() => addScreen(16, 9, 0, 5, -9));
-
-        // Small PA
-        const paMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
-        for (let side of [-1, 1]) {
-            stageBuildQueue.push(() => {
-                const paGroup = new THREE.Group();
-                paGroup.position.set(side * 8, 0, -8);
-                for (let i = 0; i < 3; i++) {
-                  const box = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), paMat);
-                  box.position.y = 0.75 + i * 1.6;
-                  paGroup.add(box);
-                }
-                stageGroup.add(paGroup);
-            });
-        }
-    }
-
-    // Common Elements (DJ Table + CDJs)
-    stageBuildQueue.push(() => {
-        const djZ = CFG.stageSize === 'large' ? -15 : -6;
-        const djTable = new THREE.Mesh(new THREE.BoxGeometry(6, 1.2, 2.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-        djTable.position.set(0, 0.6, djZ);
-        stageGroup.add(djTable);
-        
-        const eqMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.5 });
-        const mixer = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 1.5), eqMat);
-        mixer.position.set(0, 1.3, djZ);
-        stageGroup.add(mixer);
-        const cdj1 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
-        cdj1.position.set(-1.4, 1.275, djZ);
-        stageGroup.add(cdj1);
-        const cdj2 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
-        cdj2.position.set(1.4, 1.275, djZ);
-        stageGroup.add(cdj2);
-    });
-}
-
-buildStageEnvironment();
-
-scene.add(new THREE.AmbientLight(0x334466, 1.2)); // Strong ambient so stage geometry is always visible
-const stageLight = new THREE.PointLight(0x6688ff, 2.0, 200); // Bright stage illumination
+const stageLight = new THREE.PointLight(0x6688ff, 2.0, 200);
 stageLight.position.set(0, 20, 0);
 scene.add(stageLight);
 
-// Extra fill lights so trusses/screens are never pitch-black
 const fillLeft  = new THREE.PointLight(0x334466, 1.0, 150);
 fillLeft.position.set(-40, 15, -10);
 scene.add(fillLeft);
@@ -673,9 +951,491 @@ const fillRight = new THREE.PointLight(0x334466, 1.0, 150);
 fillRight.position.set(40, 15, -10);
 scene.add(fillRight);
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 0.5); // Slightly stronger directional key
+const sunLight = new THREE.DirectionalLight(0xffffff, 0.5);
 sunLight.position.set(0, 50, 50);
 scene.add(sunLight);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SHADOW CASTERS
+//
+//  The moving heads are geometry only — instanced housings plus additively
+//  blended cones. There is no THREE light behind any of them, so before this
+//  nothing in the scene could cast a shadow at all. This is a small pool of real
+//  SpotLights that gets re-aimed every frame at the brightest active heads,
+//  which is what makes light pools on the floor and shadows behind the truss
+//  possible in the first place.
+//
+//  The pool size is fixed on purpose. In three.js the number of shadow-casting
+//  lights is part of every material's program cache key, so growing or shrinking
+//  it — or toggling a light's `visible` / `castShadow` — forces a full shader
+//  recompile and a visible hitch. Unused casters are parked at intensity 0
+//  instead, and the LOD system scales shadow *resolution* rather than count.
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  ADDITIVE BEAM EXPOSURE
+//
+//  The post chain accumulates the additively blended beams in a HalfFloat
+//  buffer, and three skips per-material tone mapping when drawing into a render
+//  target (it only tone maps straight to the canvas). The previous direct render
+//  therefore compressed every beam *before* it was added, which acted as a
+//  per-beam limiter; now the raw sum is compressed once at the very end.
+//
+//  The opacities below were authored against that old behaviour, so unscaled
+//  they stack far past 1.0 and drive all three channels to white. Measured on
+//  the rendered frame: unscaled, 1.2% of pixels are fully blown and mean
+//  saturation is 0.13 — the show reads as a white haze with no discernible
+//  beams. At this scale it is 0.04% blown at saturation 0.22, and individual
+//  coloured beams are legible again.
+// ─────────────────────────────────────────────────────────────────────────────
+const BEAM_HDR_SCALE = 0.45;
+
+const SHADOW_CASTER_COUNT = 4;
+const SHADOW_MAP_SIZES = [1024, 512, 0]; // indexed by LOD level; 0 = shadows off
+const SHADOW_BIAS = -0.0005;
+const SHADOW_BEAM_LEN = 45;              // matches the moving-head cone geometry
+const SHADOW_CONE_ANGLE = Math.atan(16.0 / SHADOW_BEAM_LEN); // wash cone half-angle
+
+const shadowCasters = [];
+let shadowsEnabled = true;
+let shadowMapSize = SHADOW_MAP_SIZES[0];
+let shadowCastersInUse = 0;
+let shadowFlagsDirty = true; // re-apply cast/receive flags after a stage or crowd rebuild
+
+for (let i = 0; i < SHADOW_CASTER_COUNT; i++) {
+    const light = new THREE.SpotLight(0xffffff, 0, 120, SHADOW_CONE_ANGLE, 0.45, 1.2);
+    light.castShadow = true;
+    light.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+    light.shadow.bias = SHADOW_BIAS;
+    light.shadow.camera.near = 1.5;
+    light.shadow.camera.far = 90;
+    light.position.set(0, 12, -12);
+
+    // A SpotLight aims at its target's world position, so the target has to sit
+    // in the scene graph for its matrix to be updated.
+    const target = new THREE.Object3D();
+    scene.add(target);
+    light.target = target;
+
+    scene.add(light);
+    shadowCasters.push({ light, target });
+}
+
+/** Applies cast/receive flags across stage, floor, crowd and DJ rig. */
+function applyShadowFlags() {
+    floor.receiveShadow = true;
+
+    // Everything structural lives in stageGroup: trusses, the two tower legs,
+    // screens, and whatever a custom layout compiled into it.
+    stageGroup.traverse(obj => {
+        if (!obj.isMesh) return;
+        const isScreen = screenMeshes.indexOf(obj) !== -1;
+        obj.receiveShadow = true;
+        obj.castShadow = !isScreen; // LED panels are flat emitters, not blockers
+    });
+
+    // The crowd is billboarded planes on MeshBasicMaterial, and that material
+    // ignores lighting entirely — receiveShadow is a no-op there until the
+    // material changes. The flag is set anyway so the crowd starts receiving the
+    // moment it moves to a lit material.
+    for (let i = 0; i < crowdObjects.length; i++) {
+        if (crowdObjects[i].mesh) crowdObjects[i].mesh.receiveShadow = true;
+    }
+
+    // createDJAvatarMesh() returns a rig descriptor, not an Object3D — the actual
+    // scene node hangs off .root.
+    if (typeof djAvatarRig !== 'undefined' && djAvatarRig && djAvatarRig.root) {
+        djAvatarRig.root.traverse(obj => {
+            if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+        });
+    }
+}
+
+/** Switches shadow resolution, or turns shadows off entirely, for an LOD level. */
+function setShadowQuality(lodLevel) {
+    const size = SHADOW_MAP_SIZES[Math.max(0, Math.min(2, lodLevel))];
+    const wantEnabled = size > 0;
+
+    if (wantEnabled !== shadowsEnabled) {
+        shadowsEnabled = wantEnabled;
+        renderer.shadowMap.enabled = wantEnabled;
+        // Materials were compiled against the old shadow setting and have to be
+        // rebuilt once. This is the one unavoidable hitch, hence the dwell time
+        // guarding the LOD transition that calls it.
+        scene.traverse(obj => {
+            if (!obj.isMesh || !obj.material) return;
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach(m => { m.needsUpdate = true; });
+        });
+    }
+    if (!wantEnabled || size === shadowMapSize) return;
+
+    shadowMapSize = size;
+    shadowCasters.forEach(({ light }) => {
+        light.shadow.mapSize.set(size, size);
+        // The render target was allocated at the old size; drop it so three
+        // reallocates. Changing mapSize on its own has no effect. The depth
+        // texture has to go first — this mirrors what WebGLShadowMap does
+        // internally when a shadow's type changes; disposing only the target
+        // leaks the depth attachment.
+        if (light.shadow.map) {
+            if (light.shadow.map.depthTexture) {
+                light.shadow.map.depthTexture.dispose();
+                light.shadow.map.depthTexture = null;
+            }
+            light.shadow.map.dispose();
+            light.shadow.map = null;
+        }
+    });
+}
+
+const _shadowTopLum = new Float32Array(SHADOW_CASTER_COUNT);
+const _shadowTopIdx = new Int32Array(SHADOW_CASTER_COUNT);
+
+/**
+ * Re-aims the caster pool at this frame's brightest moving-head beams. Runs off
+ * activeBeams, which the moving-head update already fills with origin, direction
+ * and colour — so no extra per-fixture bookkeeping is needed.
+ */
+function updateShadowCasters() {
+    if (!shadowsEnabled) { shadowCastersInUse = 0; return; }
+
+    // Top-k selection by luminance. k is 4, so an insertion pass beats sorting
+    // the whole beam list and allocates nothing.
+    _shadowTopLum.fill(-1);
+    _shadowTopIdx.fill(-1);
+
+    for (let b = 0; b < activeBeams.length; b++) {
+        const beam = activeBeams[b];
+        if (beam.isLaser) continue; // laser beams are pencil-thin: no usable pool
+        const c = beam.color;
+        const lum = c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
+        if (lum <= 0.02) continue;
+
+        for (let k = 0; k < SHADOW_CASTER_COUNT; k++) {
+            if (lum > _shadowTopLum[k]) {
+                for (let j = SHADOW_CASTER_COUNT - 1; j > k; j--) {
+                    _shadowTopLum[j] = _shadowTopLum[j - 1];
+                    _shadowTopIdx[j] = _shadowTopIdx[j - 1];
+                }
+                _shadowTopLum[k] = lum;
+                _shadowTopIdx[k] = b;
+                break;
+            }
+        }
+    }
+
+    shadowCastersInUse = 0;
+    for (let k = 0; k < SHADOW_CASTER_COUNT; k++) {
+        const entry = shadowCasters[k];
+        const light = entry.light;
+        const idx = _shadowTopIdx[k];
+
+        if (idx < 0) {
+            // Park it. Intensity 0 keeps the light in the scene graph, which keeps
+            // the shader program stable; hiding it would trigger a recompile.
+            light.intensity = 0;
+            continue;
+        }
+
+        const beam = activeBeams[idx];
+        light.position.copy(beam.pos);
+        entry.target.position.copy(beam.pos).addScaledVector(beam.dir, SHADOW_BEAM_LEN);
+        entry.target.updateMatrixWorld();
+
+        // Separate hue from brightness: the beam colour already has the fixture's
+        // opacity baked in, so feeding it straight to the light would dim twice.
+        const peak = Math.max(beam.color.r, beam.color.g, beam.color.b, 1e-4);
+        light.color.copy(beam.color).multiplyScalar(1 / peak);
+        // three uses physical light units since r155: intensity is candela and
+        // falls off over the ~14 m to the floor, so single-digit values do almost
+        // nothing. Measured against floor luminance, the useful range here tops
+        // out around 250 — beyond that the tone mapping simply clips.
+        light.intensity = Math.min(_shadowTopLum[k] * 380, 250) * CFG.mhIntensity;
+        shadowCastersInUse++;
+    }
+}
+
+function getShadowStats() {
+    return {
+        enabled: shadowsEnabled,
+        mapSize: shadowMapSize,
+        poolSize: SHADOW_CASTER_COUNT,
+        inUse: shadowCastersInUse,
+        lod: currentLODLevel
+    };
+}
+
+let compiledCustomLayout = null;
+
+function buildStageEnvironment() {
+    shadowFlagsDirty = true;
+    // Clear old stage
+    while(stageGroup.children.length > 0){ 
+        const child = stageGroup.children[0];
+        stageGroup.remove(child); 
+    }
+    screenMeshes.length = 0;
+    stageBuildQueue.length = 0;
+
+    const presetKey = CFG.stagePreset || 'openair';
+
+    // Reset floor texture
+    if (floor && floor.material) {
+        floor.material.map = null;
+        floor.material.color.set(0x050505);
+        floor.material.roughness = 0.6;
+        floor.material.needsUpdate = true;
+    }
+
+    if (presetKey === 'berghain') {
+        // ─── BERGHAIN BUNKER ───
+        setRainState(false);
+        ambientLight.intensity = 0.35;
+        stageLight.intensity = 1.8;
+        fillLeft.intensity = 0.8;
+        fillRight.intensity = 0.8;
+        sunLight.intensity = 0.2;
+        CFG.hazeDensity = 0.90;
+        CFG.theme = 'bloodmoon';
+
+        // Concrete bunker ceiling (5.0m concrete slab)
+        const concMat = new THREE.MeshStandardMaterial({ color: 0x141417, roughness: 0.95, metalness: 0.1 });
+        const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(30, 40), concMat);
+        ceiling.position.set(0, 5.0, -10);
+        ceiling.rotation.x = Math.PI / 2;
+        stageGroup.add(ceiling);
+
+        // Concrete bunker walls
+        const backW = new THREE.Mesh(new THREE.PlaneGeometry(30, 5.0), concMat);
+        backW.position.set(0, 2.5, -30);
+        stageGroup.add(backW);
+
+        const leftW = new THREE.Mesh(new THREE.PlaneGeometry(40, 5.0), concMat);
+        leftW.position.set(-15, 2.5, -10);
+        leftW.rotation.y = Math.PI / 2;
+        stageGroup.add(leftW);
+
+        const rightW = new THREE.Mesh(new THREE.PlaneGeometry(40, 5.0), concMat);
+        rightW.position.set(15, 2.5, -10);
+        rightW.rotation.y = -Math.PI / 2;
+        stageGroup.add(rightW);
+
+        // 8 Dark Steel I-Beams along ceiling at y = 4.8m
+        const beamMat = new THREE.MeshStandardMaterial({ color: 0x222226, metalness: 0.7, roughness: 0.4 });
+        for (let i = 0; i < 8; i++) {
+            const zPos = -28 + i * 5.0;
+            const beam = new THREE.Mesh(new THREE.BoxGeometry(30, 0.4, 0.4), beamMat);
+            beam.position.set(0, 4.8, zPos);
+            stageGroup.add(beam);
+        }
+
+        // DJ Table
+        const djTable = new THREE.Mesh(new THREE.BoxGeometry(5, 1.1, 2.0), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        djTable.position.set(0, 0.55, -15);
+        stageGroup.add(djTable);
+
+    } else if (presetKey === 'arena') {
+        // ─── ARENA 360 (IN-THE-ROUND) ───
+        setRainState(false);
+        ambientLight.intensity = 0.45;
+        stageLight.intensity = 2.2;
+        fillLeft.intensity = 1.0;
+        fillRight.intensity = 1.0;
+        sunLight.intensity = 0.4;
+        CFG.hazeDensity = 0.60;
+
+        // Circular center stage platform
+        const stageMat = new THREE.MeshStandardMaterial({ color: 0x181820, roughness: 0.7, metalness: 0.2 });
+        const stagePlat = new THREE.Mesh(new THREE.CylinderGeometry(7.0, 7.0, 1.2, 32), stageMat);
+        stagePlat.position.set(0, 0.6, 0);
+        stageGroup.add(stagePlat);
+
+        // 360° Suspended Circular Truss Rig at y = 20.0m (radius 18m)
+        const circTrussGeo = new THREE.TorusGeometry(18.0, 0.4, 8, 48);
+        const circTruss = new THREE.Mesh(circTrussGeo, trussMat);
+        circTruss.position.set(0, 20.0, 0);
+        circTruss.rotation.x = Math.PI / 2;
+        stageGroup.add(circTruss);
+
+        // 360° Cylindrical Wrapping LED Screen at y = 14.0m (radius 12m, h 6m)
+        const cylScreenGeo = new THREE.CylinderGeometry(12.0, 12.0, 6.0, 64, 1, true);
+        const cylScreen = new THREE.Mesh(cylScreenGeo, ledScreenMat);
+        cylScreen.position.set(0, 14.0, 0);
+        stageGroup.add(cylScreen);
+        screenMeshes.push(cylScreen);
+
+        // DJ Table in center
+        const djTable = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.1, 2.0), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        djTable.position.set(0, 1.75, 0);
+        stageGroup.add(djTable);
+
+    } else if (presetKey === 'basement') {
+        // ─── BASEMENT CLUB (8x8x3m) ───
+        setRainState(false);
+        ambientLight.intensity = 0.35;
+        stageLight.intensity = 1.2;
+        fillLeft.intensity = 0.5;
+        fillRight.intensity = 0.5;
+        sunLight.intensity = 0.1;
+        CFG.hazeDensity = 1.0;
+
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.95 });
+        // Ceiling at y = 3m
+        const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), wallMat);
+        ceiling.position.set(0, 3.0, 0);
+        ceiling.rotation.x = Math.PI / 2;
+        stageGroup.add(ceiling);
+
+        // 4 Walls (8m x 3m)
+        const backW = new THREE.Mesh(new THREE.PlaneGeometry(8, 3.0), wallMat);
+        backW.position.set(0, 1.5, -4.0);
+        stageGroup.add(backW);
+
+        const frontW = new THREE.Mesh(new THREE.PlaneGeometry(8, 3.0), wallMat);
+        frontW.position.set(0, 1.5, 4.0);
+        frontW.rotation.y = Math.PI;
+        stageGroup.add(frontW);
+
+        const leftW = new THREE.Mesh(new THREE.PlaneGeometry(8, 3.0), wallMat);
+        leftW.position.set(-4.0, 1.5, 0);
+        leftW.rotation.y = Math.PI / 2;
+        stageGroup.add(leftW);
+
+        const rightW = new THREE.Mesh(new THREE.PlaneGeometry(8, 3.0), wallMat);
+        rightW.position.set(4.0, 1.5, 0);
+        rightW.rotation.y = -Math.PI / 2;
+        stageGroup.add(rightW);
+
+        // 3 Glowing Neon Signs
+        const signNoPhotos = createNeonSign('NO PHOTOS', 0xff0044, { x: -3.9, y: 2.0, z: 0 }, Math.PI / 2);
+        stageGroup.add(signNoPhotos);
+
+        const signClub = createNeonSign('CLUB', 0x00ffcc, { x: 3.9, y: 2.2, z: 1 }, -Math.PI / 2);
+        stageGroup.add(signClub);
+
+        const signRave = createNeonSign('RAVE', 0xffff00, { x: 0, y: 2.4, z: -3.9 }, 0);
+        stageGroup.add(signRave);
+
+        // Compact DJ Table
+        const djTable = new THREE.Mesh(new THREE.BoxGeometry(3, 1.0, 1.4), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        djTable.position.set(0, 0.5, -3.0);
+        stageGroup.add(djTable);
+
+    } else if (presetKey === 'custom') {
+        // ─── CUSTOM STAGE LAYOUT ───
+        setRainState(false);
+        ambientLight.intensity = 0.6;
+        stageLight.intensity = 2.0;
+        fillLeft.intensity = 1.0;
+        fillRight.intensity = 1.0;
+        sunLight.intensity = 0.5;
+
+        const layout = loadLayoutFromStorage();
+        compiledCustomLayout = compileCustomStageLayout(layout);
+
+        // Trusses
+        compiledCustomLayout.trusses.forEach(tr => {
+            const sx = (tr.scale?.x || 1) * 4;
+            const sy = (tr.scale?.y || 1) * 0.4;
+            const sz = (tr.scale?.z || 1) * 0.4;
+            createTruss(sx, sy, sz, tr.position.x, tr.position.y, tr.position.z, tr.rotation?.x || 0, tr.rotation?.y || 0, tr.rotation?.z || 0);
+        });
+
+        // Screens
+        compiledCustomLayout.screens.forEach(scr => {
+            const sw = (scr.scale?.x || 1) * 6;
+            const sh = (scr.scale?.y || 1) * 3.5;
+            addScreen(sw, sh, scr.position.x, scr.position.y, scr.position.z, scr.rotation?.y || 0);
+        });
+
+        const djTable = new THREE.Mesh(new THREE.BoxGeometry(6, 1.2, 2.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        djTable.position.set(0, 0.6, -10);
+        stageGroup.add(djTable);
+
+    } else {
+        // ─── OPEN-AIR FESTIVAL (DEFAULT) ───
+        const isRainChecked = document.getElementById('param-weather-rain')?.checked;
+        setRainState(!!isRainChecked, 4000);
+        ambientLight.intensity = 0.5;
+        stageLight.intensity = 2.5;
+        fillLeft.intensity = 1.2;
+        fillRight.intensity = 1.2;
+        sunLight.intensity = 0.6;
+        CFG.hazeDensity = 0.55;
+
+        // Procedural Starfield (2500 points)
+        const starfield = createProceduralStarfield(2500, 300);
+        stageGroup.add(starfield);
+
+        // Procedural Grass texture
+        const grassTex = createProceduralGrassTexture();
+        if (grassTex && floor && floor.material) {
+            floor.material.map = grassTex;
+            floor.material.needsUpdate = true;
+        }
+
+        // Horizontal Main Trusses (40m width)
+        createTruss(40, 0.4, 0.4, 0, 14, -10);
+        createTruss(40, 0.4, 0.4, 0, 14, -20);
+        createTruss(40, 0.4, 0.4, 0, 10, -15);
+
+        // Vertical Supports
+        for (let x of [-19, 19]) {
+            createTruss(0.4, 14, 0.4, x, 7, -10);
+            createTruss(0.4, 14, 0.4, x, 7, -20);
+        }
+
+        // Dual 22m Truss Towers at x = -20m and x = +20m, z = -5m
+        createTruss(2.0, 22.0, 2.0, -20.0, 11.0, -5.0);
+        createTruss(2.0, 22.0, 2.0, 20.0, 11.0, -5.0);
+
+        // 3 Screens: Main 30x15m wall + 2 Tower screens 8x20m
+        addScreen(30, 15, 0, 7.5, -25);
+        addScreen(8, 20, -20, 10, -5, Math.PI / 12);
+        addScreen(8, 20, 20, 10, -5, -Math.PI / 12);
+
+        // DJ Booth Screens
+        addScreen(8, 4, 0, 2, -15);
+
+        // DJ Table + CDJs
+        const djTable = new THREE.Mesh(new THREE.BoxGeometry(6, 1.2, 2.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        djTable.position.set(0, 0.6, -15);
+        stageGroup.add(djTable);
+
+        const eqMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.5 });
+        const mixer = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 1.5), eqMat);
+        mixer.position.set(0, 1.3, -15);
+        stageGroup.add(mixer);
+        const cdj1 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
+        cdj1.position.set(-1.4, 1.275, -15);
+        stageGroup.add(cdj1);
+        const cdj2 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 1.4), eqMat);
+        cdj2.position.set(1.4, 1.275, -15);
+        stageGroup.add(cdj2);
+    }
+
+    // Mount procedural 3D DJ Avatar behind the DJ booth (R6)
+    if (djAvatarRig && djAvatarRig.root && djAvatarRig.root.parent) {
+        djAvatarRig.root.parent.remove(djAvatarRig.root);
+    }
+    djAvatarRig = createDJAvatarMesh();
+    if (presetKey === 'arena') {
+        djAvatarRig.root.position.set(0, 0.6, -1.2);
+    } else if (presetKey === 'basement') {
+        djAvatarRig.root.position.set(0, 0.0, -3.8);
+    } else if (presetKey === 'berghain') {
+        djAvatarRig.root.position.set(0, 0.0, -16.2);
+    } else if (presetKey === 'small') {
+        djAvatarRig.root.position.set(0, 0.0, -11.2);
+    } else {
+        djAvatarRig.root.position.set(0, 0.0, -16.2);
+    }
+    djAvatarRig.root.visible = djAvatarEnabled;
+    stageGroup.add(djAvatarRig.root);
+}
+
+buildStageEnvironment();
+
 
 
 // ─────────────────────────────────────────────
@@ -684,6 +1444,52 @@ scene.add(sunLight);
 
 const pyroWorker = new Worker(new URL('./pyro-worker.js', import.meta.url), { type: 'module' });
 let pyroSystemIdCounter = 0;
+
+let pyroAudioListener = null;
+function getPyroAudioListener(camera) {
+    if (!pyroAudioListener) {
+        pyroAudioListener = new THREE.AudioListener();
+        camera.add(pyroAudioListener);
+    }
+    return pyroAudioListener;
+}
+
+// Every PyroSystem used to build its Web Audio graph in its constructor, which
+// runs at page load. That constructed an AudioContext before any user gesture
+// (Chrome then logs "The AudioContext was not allowed to start" and leaves it
+// suspended) and generated one 2-second white-noise buffer per system. The graph
+// is now built on the first user interaction, and the noise buffer is shared.
+let pyroAudioUnlocked = false;
+let sharedPyroNoiseBuffer = null;
+
+function getSharedPyroNoiseBuffer(ctx) {
+    if (!sharedPyroNoiseBuffer || sharedPyroNoiseBuffer.sampleRate !== ctx.sampleRate) {
+        const bufferSize = Math.floor(ctx.sampleRate * 2); // 2 seconds
+        sharedPyroNoiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = sharedPyroNoiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+    }
+    return sharedPyroNoiseBuffer;
+}
+
+/** Builds the deferred pyro audio graphs. Safe to call more than once. */
+function unlockPyroAudio() {
+    if (pyroAudioUnlocked) return;
+    pyroAudioUnlocked = true;
+    pyroSystems.forEach(ps => { try { ps.initAudio(); } catch (e) { console.warn('[Pyro] audio init failed', e); } });
+    if (pyroAudioListener && pyroAudioListener.context && pyroAudioListener.context.state === 'suspended') {
+        pyroAudioListener.context.resume().catch(() => {});
+    }
+}
+
+// Browsers only allow an AudioContext to start inside a user gesture, so arm the
+// pyro audio on the first interaction of any kind and then stop listening.
+if (typeof window !== 'undefined') {
+    const armPyroAudio = () => unlockPyroAudio();
+    ['pointerdown', 'keydown', 'touchstart'].forEach(evt =>
+        window.addEventListener(evt, armPyroAudio, { once: true, passive: true })
+    );
+}
 
 // WebGPU-native particle materials using PointsNodeMaterial + TSL
 // A soft radial gradient disc — stays fully compatible with the WebGPU RenderPipeline.
@@ -719,7 +1525,7 @@ function makeParticleMaterial(baseSize, baseOpacity) {
         `,
         transparent: true,
         depthWrite: false,
-        blending: THREE.AdditiveBlending
+        blending: THREE.NormalBlending
     });
 }
 
@@ -761,6 +1567,18 @@ class PyroSystem {
         this.points.frustumCulled = false;
         scene.add(this.points);
 
+        // Add dynamic light
+        this.light = new THREE.PointLight(0xffaa55, 0, 20);
+        this.light.position.set(x, y + 2, z);
+        scene.add(this.light);
+
+        // Procedural audio is built lazily — see unlockPyroAudio().
+        this.sound = null;
+        this.noiseSource = null;
+        this.filter = null;
+        this.gainNode = null;
+        if (pyroAudioUnlocked) this.initAudio();
+
         pyroWorker.postMessage({
             type: 'init',
             id: this.id,
@@ -768,7 +1586,7 @@ class PyroSystem {
         });
 
         this.onWorkerMessage = (e) => {
-            const { type, id } = e.data;
+            const { type, id, burstIntensity } = e.data;
             if (type === 'updated' && id === this.id) {
                 this.posAttr.needsUpdate = true;
                 this.ageAttr.needsUpdate = true;
@@ -777,21 +1595,113 @@ class PyroSystem {
                 this.colorAttr.needsUpdate = true;
                 this.geo.setDrawRange(0, this.maxParticles);
                 this.isUpdating = false;
+
+                // Sync light and sound
+                if (this.type === 'flame' && burstIntensity !== undefined) {
+                    this.light.intensity = burstIntensity * 10;
+
+                    if (!this.sound || !this.gainNode) return; // audio not unlocked yet
+                    const now = this.sound.context.currentTime;
+                    // Hiss/roar
+                    this.gainNode.gain.setTargetAtTime(burstIntensity * 1.5, now, 0.05);
+                    this.filter.frequency.setTargetAtTime(500 + burstIntensity * 3000, now, 0.05);
+                }
             }
         };
 
         pyroWorker.addEventListener('message', this.onWorkerMessage);
     }
 
-    update(dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak) {
+    /** Creates this system's Web Audio graph. Called after the first user gesture. */
+    initAudio() {
+        if (this.sound) return;
+
+        this.sound = new THREE.PositionalAudio(getPyroAudioListener(camera));
+        this.sound.setRefDistance(5);
+        this.sound.setVolume(0);
+
+        const ctx = this.sound.context;
+        this.noiseSource = ctx.createBufferSource();
+        this.noiseSource.buffer = getSharedPyroNoiseBuffer(ctx);
+        this.noiseSource.loop = true;
+
+        this.filter = ctx.createBiquadFilter();
+        this.filter.type = 'lowpass';
+        this.filter.frequency.value = 500;
+
+        this.gainNode = ctx.createGain();
+        this.gainNode.gain.value = 0;
+
+        this.noiseSource.connect(this.filter);
+        this.filter.connect(this.gainNode);
+
+        this.sound.setNodeSource(this.gainNode);
+        this.points.add(this.sound);
+
+        // Runs continuously but silent (gain = 0) until a burst raises it.
+        this.noiseSource.start(0);
+    }
+
+    triggerBang() {
+        if (!this.sound || !this.sound.context) return;
+        const ctx = this.sound.context;
+        const now = ctx.currentTime;
+        
+        // Short, explosive low-end punch
+        const osc = ctx.createOscillator();
+        osc.type = 'triangle';
+        const oscGain = ctx.createGain();
+        osc.connect(oscGain);
+        if (this.sound.getInput) oscGain.connect(this.sound.getInput());
+        
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+        
+        oscGain.gain.setValueAtTime(2.0, now);
+        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        
+        osc.start(now);
+        osc.stop(now + 0.2);
+        
+        // Noise burst for the pop
+        if (this.noiseSource && this.noiseSource.buffer) {
+            const noise = ctx.createBufferSource();
+            noise.buffer = this.noiseSource.buffer;
+            const noiseFilter = ctx.createBiquadFilter();
+            noiseFilter.type = 'lowpass';
+            noiseFilter.frequency.setValueAtTime(3000, now);
+            noiseFilter.frequency.exponentialRampToValueAtTime(200, now + 0.2);
+            
+            const noiseGain = ctx.createGain();
+            noiseGain.gain.setValueAtTime(3.0, now);
+            noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            
+            noise.connect(noiseFilter);
+            noiseFilter.connect(noiseGain);
+            if (this.sound.getInput) noiseGain.connect(this.sound.getInput());
+            
+            noise.start(now);
+            noise.stop(now + 0.3);
+        }
+    }
+
+    update(dt, globalT, energy, bass, mid, high, kick, windX, windY, pyroIntensity, isPeak) {
         if (this.isUpdating) return;
         this.isUpdating = true;
+
+        if (this.type === 'flame' && isPeak && kick > 0.8) {
+            const ctx = this.sound.context;
+            if (!this.lastBangTime || ctx.currentTime - this.lastBangTime > 0.25) {
+                this.lastBangTime = ctx.currentTime;
+                this.triggerBang();
+            }
+        }
 
         pyroWorker.postMessage({
             type: 'update',
             id: this.id,
             data: {
-                dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak
+                dt, globalT, energy, bass, mid, high, kick, windX, windY, pyroIntensity, isPeak
             }
         });
     }
@@ -800,22 +1710,39 @@ class PyroSystem {
         pyroWorker.removeEventListener('message', this.onWorkerMessage);
         pyroWorker.postMessage({ type: 'dispose', id: this.id });
         scene.remove(this.points);
+        scene.remove(this.light);
+        if (this.sound && this.sound.parent) this.sound.parent.remove(this.sound);
+        if (this.noiseSource) this.noiseSource.stop();
         this.geo.dispose();
         if (this.points.material) this.points.material.dispose();
     }
 }
 
-// ─────────────────────────────────────────────
-//  PLACE PYRO UNITS ON STAGE
-// ─────────────────────────────────────────────
 function initPyroSystems() {
     // Clear old
     pyroSystems.forEach(p => p.dispose());
     pyroSystems = [];
 
+    const presetKey = CFG.stagePreset || 'openair';
+
+    if (presetKey === 'custom' && compiledCustomLayout && compiledCustomLayout.co2Jets && compiledCustomLayout.co2Jets.length > 0) {
+        compiledCustomLayout.co2Jets.forEach(jet => {
+            pyroSystems.push(new PyroSystem({
+                x: jet.position.x,
+                y: jet.position.y || 0.1,
+                z: jet.position.z,
+                type: 'flame',
+                maxParticles: 400,
+                emitDir: { x: 0, y: 1.0, z: 0 },
+                spread: 0.2
+            }));
+        });
+        return;
+    }
+
     const sparkZ = CFG.stageSize === 'large' ? -10 : -3; 
 
-    if (CFG.stageSize === 'large') {
+    if (CFG.stageSize === 'large' && presetKey !== 'basement') {
         const pyroCount = 3;
         // 3 flamethrowers on left edge, 3 on right edge (at floor level, shooting up)
         for (let side of [-1, 1]) {
@@ -843,7 +1770,7 @@ function initPyroSystems() {
         }
     }
 
-    // 2 spark fountains on the DJ table surface (djZ table is moved in small stage so we adjust Z here)
+    // 2 spark fountains on the DJ table surface
     for (let side of [-1.5, 1.5]) {
         pyroSystems.push(new PyroSystem({
             x: side, y: 1.4, z: sparkZ,
@@ -889,6 +1816,35 @@ let laserSpotsIM = null;
 let crowdMatUp = null;
 let crowdMatDown = null;
 let activeBeams = [];
+// activeBeams is rebuilt from scratch every frame and read by the rain-reflection
+// and crowd-lighting passes. Allocating a Vector3 + Euler + Color per beam per
+// frame (~40 beams x 60 fps x 4 objects) is pure GC pressure, so the entries are
+// pooled and reused; only the pool's length grows.
+const _beamPool = [];
+let _beamPoolUsed = 0;
+const _beamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _stageWorldPos = new THREE.Vector3(); // scratch for the per-frame LOD sweep
+
+function resetBeamPool() {
+    activeBeams.length = 0;
+    _beamPoolUsed = 0;
+}
+
+/** Grabs a pooled beam record, fills it in and pushes it onto activeBeams. */
+function pushBeam(px, py, pz, rotX, rotY, color, isLaser) {
+    let b = _beamPool[_beamPoolUsed];
+    if (!b) {
+        b = { pos: new THREE.Vector3(), dir: new THREE.Vector3(), color: new THREE.Color(), isLaser: false };
+        _beamPool[_beamPoolUsed] = b;
+    }
+    _beamPoolUsed++;
+    b.pos.set(px, py, pz);
+    b.dir.set(0, 0, 1).applyEuler(_beamEuler.set(rotX, rotY, 0, 'YXZ'));
+    b.color.copy(color);
+    b.isLaser = isLaser;
+    activeBeams.push(b);
+    return b;
+}
 
 
 
@@ -960,7 +1916,7 @@ function setupMovingHeadIM(count) {
     });
     mhCoreIM = new THREE.InstancedMesh(coneGeo, getSharedMat('mhCore', () => new THREE.MeshBasicMaterial({
         color: 0xffffff,
-        transparent: true, opacity: 0.02 + CFG.hazeDensity * 0.06,
+        transparent: true, opacity: (0.02 + CFG.hazeDensity * 0.06) * BEAM_HDR_SCALE,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
         alphaMap: globalGoboTexture
     })), count);
@@ -973,7 +1929,7 @@ function setupMovingHeadIM(count) {
     });
     mhWashIM = new THREE.InstancedMesh(washGeo, getSharedMat('mhWash', () => new THREE.MeshBasicMaterial({
         color: 0xffffff,
-        transparent: true, opacity: CFG.hazeDensity * 0.02,
+        transparent: true, opacity: (CFG.hazeDensity * 0.02) * BEAM_HDR_SCALE,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
     })), count);
 
@@ -1003,45 +1959,90 @@ function initMovingHeads(count = CFG.movingHeadCount) {
     // Dispose old proxies from scene
     movingHeadObjects.forEach(mh => scene.remove(mh.proxy));
     movingHeadObjects.length = 0;
-    CFG.movingHeadCount = count;
     if (!movingHeadsEnabled) return;
 
-    setupMovingHeadIM(count);
+    let mhSlots = [];
+    const presetKey = CFG.stagePreset || 'openair';
 
-    let idx = 0;
-    MH_TRUSS_ROWS.forEach((row, ri) => {
-        const rowCount = ri < MH_TRUSS_ROWS.length - 1
-            ? Math.round(count * row.cols)
-            : count - idx; // last row gets remainder
-        const spacing = rowCount > 1 ? 120 / (rowCount - 1) : 0;
-
-        for (let c = 0; c < rowCount && idx < count; c++, idx++) {
-            const x = -60 + c * (rowCount > 1 ? spacing : 0);
-            const y = row.y;
-            const z = row.z;
-
-            const proxy = new THREE.Group();
-            proxy.position.set(x, y, z);
-            scene.add(proxy);
-
-            const hitbox = new THREE.Mesh(
-                new THREE.BoxGeometry(1.2, 1.5, 1.2),
-                new THREE.MeshBasicMaterial({ visible: false })
-            );
-            hitbox.userData.isProjectorHitbox = true;
-            hitbox.userData.isMovingHead = true;
-            proxy.add(hitbox);
-
-            movingHeadObjects.push({
-                pos: proxy.position,
-                proxy,
-                intensity: 1.0,
-                color: _white.clone(),
-                headState: { panVel: 0, tiltVel: 0, adsrState: 0, pan: 0, tilt: Math.PI * 0.28 }
-                //  tilt > 0 → beam sweeps downward toward floor (correct for overhead fixtures)
+    if (presetKey === 'custom' && compiledCustomLayout && compiledCustomLayout.movingHeads.length > 0) {
+        count = compiledCustomLayout.movingHeads.length;
+        mhSlots = compiledCustomLayout.movingHeads.map(mh => ({
+            x: mh.position.x,
+            y: mh.position.y,
+            z: mh.position.z
+        }));
+    } else if (presetKey === 'berghain') {
+        count = 6;
+        mhSlots = [
+            { x: -1.5, y: 4.8, z: -16 },
+            { x: 1.5, y: 4.8, z: -12 },
+            { x: -1.5, y: 4.8, z: -8 },
+            { x: 1.5, y: 4.8, z: -4 },
+            { x: -1.5, y: 4.8, z: 0 },
+            { x: 1.5, y: 4.8, z: 4 }
+        ];
+    } else if (presetKey === 'basement') {
+        count = 4;
+        mhSlots = [
+            { x: -3.0, y: 2.8, z: -2.0 },
+            { x: -1.0, y: 2.8, z: -2.0 },
+            { x: 1.0, y: 2.8, z: -2.0 },
+            { x: 3.0, y: 2.8, z: -2.0 }
+        ];
+    } else if (presetKey === 'arena') {
+        count = 16;
+        mhSlots = [];
+        for (let i = 0; i < 16; i++) {
+            const angle = ((i + 0.5) / 16) * Math.PI * 2;
+            mhSlots.push({
+                x: Math.cos(angle) * 18.0,
+                y: 20.0,
+                z: Math.sin(angle) * 18.0
             });
         }
-    });
+    } else {
+        let idx = 0;
+        MH_TRUSS_ROWS.forEach((row, ri) => {
+            const rowCount = ri < MH_TRUSS_ROWS.length - 1
+                ? Math.round(count * row.cols)
+                : count - idx;
+            const spacing = rowCount > 1 ? 120 / (rowCount - 1) : 0;
+
+            for (let c = 0; c < rowCount && idx < count; c++, idx++) {
+                mhSlots.push({
+                    x: -60 + c * (rowCount > 1 ? spacing : 0),
+                    y: row.y,
+                    z: row.z
+                });
+            }
+        });
+    }
+
+    CFG.movingHeadCount = count;
+    setupMovingHeadIM(count);
+
+    for (let i = 0; i < count; i++) {
+        const slot = mhSlots[i] || { x: 0, y: 10, z: -10 };
+        const proxy = new THREE.Group();
+        proxy.position.set(slot.x, slot.y, slot.z);
+        scene.add(proxy);
+
+        const hitbox = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 1.5, 1.2),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        hitbox.userData.isProjectorHitbox = true;
+        hitbox.userData.isMovingHead = true;
+        proxy.add(hitbox);
+
+        movingHeadObjects.push({
+            pos: proxy.position,
+            proxy,
+            intensity: 1.0,
+            color: _white.clone(),
+            headState: { panVel: 0, tiltVel: 0, adsrState: 0, pan: 0, tilt: Math.PI * 0.28 }
+        });
+    }
 }
 
 const PATTERN_IDS = {
@@ -1357,20 +2358,22 @@ const laserVertexShader = `
       }
       
       float freqBiasOp = (uPlaying > 0.5) ? uMelody : 0.0;
-      float op = (uIsSilent > 0.5)
-          ? ((uPlaying < 0.5) ? 0.3 : 0.0)
-          : patternOpMod * min(1.0, 0.08 * uIntensity + freqBiasOp * 1.1 + uEnergy * 0.6 + uBuildUp * 0.4 + uFlashDecay * 0.9);
+      float op = (uPlaying < 0.5)
+          ? (0.85 * uIntensity)
+          : (uIsSilent > 0.5
+              ? 0.20
+              : patternOpMod * min(1.0, 0.35 * uIntensity + freqBiasOp * 1.1 + uEnergy * 0.6 + uBuildUp * 0.4 + uFlashDecay * 0.9));
           
       if (uIsStudioMode > 0.5) {
-          op = max(op, 0.5);
+          op = max(op, 0.70);
       }
       
       vec3 baseColor;
       if (uIsDynamicTheme > 0.5) {
-          float h = mod(aSectionLaserHue, 360.0);
-          baseColor = hsl2rgb(vec3(h / 360.0, 0.85, 0.5 * op + 0.02));
+          float h = mod(aSectionLaserHue + (uPlaying < 0.5 ? (uTime * 15.0 + aInstanceID * 4.0) : 0.0), 360.0);
+          baseColor = hsl2rgb(vec3(h / 360.0, 0.95, 0.55 * op + 0.15));
       } else {
-          baseColor = aStaticColor * (op * 0.9 + 0.02);
+          baseColor = aStaticColor * (op * 1.2 + 0.2);
       }
       
       vColor = vec4(baseColor, op);
@@ -1719,14 +2722,18 @@ function setupShaderAttributes(im, count) {
     const aInstanceID = new THREE.InstancedBufferAttribute(new Float32Array(count), 1);
     
     const slots = computeFormationPositions(count, CFG.formation);
-    const cols  = CFG.themes[CFG.theme];
+    const cols  = CFG.themes[CFG.theme] || [0x00ffff, 0xff00ff, 0x00ff88];
     
     for (let i = 0; i < count; i++) {
-        const s = slots[i];
-        aBaseYaw.setX(i, s.baseYaw);
-        aSectionLaserHue.setX(i, (i * 360 / count) % 360);
-        _col1.set(cols[i % cols.length]);
-        aStaticColor.setXYZ(i, _col1.r, _col1.g, _col1.b);
+        const s = (laserObjects && laserObjects[i]) ? laserObjects[i] : (slots[i] || { baseYaw: 0 });
+        aBaseYaw.setX(i, s.baseYaw || 0);
+        aSectionLaserHue.setX(i, (i * 360 / Math.max(count, 1)) % 360);
+        if (s.color) {
+            aStaticColor.setXYZ(i, s.color.r, s.color.g, s.color.b);
+        } else {
+            _col1.set(cols[i % cols.length]);
+            aStaticColor.setXYZ(i, _col1.r, _col1.g, _col1.b);
+        }
         aInstanceID.setX(i, i);
     }
     
@@ -1793,6 +2800,13 @@ function setupLaserIM(count) {
             if (im.instanceMatrix && typeof im.instanceMatrix.dispose === 'function') im.instanceMatrix.dispose();
             if (im.instanceColor && typeof im.instanceColor.dispose === 'function') im.instanceColor.dispose();
         });
+        // The beam geometries below are per-instance clones (they carry their own
+        // shader attributes), so they are NOT owned by the shared-geometry cache and
+        // must be released here — otherwise every laser-count increase leaks a pair
+        // of cylinder geometries on the GPU.
+        [laserCoreIM, laserTubeIM].forEach(im => {
+            if (im.geometry && typeof im.geometry.dispose === 'function') im.geometry.dispose();
+        });
     }
 
     // Housing box
@@ -1822,7 +2836,7 @@ function setupLaserIM(count) {
                 THREE.UniformsLib['common'],
                 THREE.UniformsLib['fog'],
                 laserUniforms,
-                { uOpacityMultiplier: { value: 0.1 + CFG.hazeDensity * 0.3 } }
+                { uOpacityMultiplier: { value: (0.6 + CFG.hazeDensity * 0.4) * BEAM_HDR_SCALE } }
             ]),
             vertexShader: laserVertexShader,
             fragmentShader: laserFragmentShader,
@@ -1832,7 +2846,7 @@ function setupLaserIM(count) {
             side: THREE.DoubleSide
         });
     } else {
-        laserCoreMaterial.uniforms.uOpacityMultiplier.value = 0.1 + CFG.hazeDensity * 0.3;
+        laserCoreMaterial.uniforms.uOpacityMultiplier.value = (0.6 + CFG.hazeDensity * 0.4) * BEAM_HDR_SCALE;
     }
 
     if (!laserTubeMaterial) {
@@ -1841,7 +2855,7 @@ function setupLaserIM(count) {
                 THREE.UniformsLib['common'],
                 THREE.UniformsLib['fog'],
                 laserUniforms,
-                { uOpacityMultiplier: { value: CFG.hazeDensity * 0.15 } }
+                { uOpacityMultiplier: { value: (0.3 + CFG.hazeDensity * 0.35) * BEAM_HDR_SCALE } }
             ]),
             vertexShader: laserVertexShader,
             fragmentShader: laserFragmentShader,
@@ -1851,7 +2865,7 @@ function setupLaserIM(count) {
             side: THREE.DoubleSide
         });
     } else {
-        laserTubeMaterial.uniforms.uOpacityMultiplier.value = CFG.hazeDensity * 0.15;
+        laserTubeMaterial.uniforms.uOpacityMultiplier.value = (0.3 + CFG.hazeDensity * 0.35) * BEAM_HDR_SCALE;
     }
 
     laserCoreIM = new THREE.InstancedMesh(coreGeo, laserCoreMaterial, count);
@@ -1872,14 +2886,60 @@ function setupLaserIM(count) {
 function initLasers(count = CFG.laserCount) {
     laserObjects.forEach(l => scene.remove(l.proxy));
     laserObjects.length = 0;
+
+    let slots = [];
+    const presetKey = CFG.stagePreset || 'openair';
+
+    if (presetKey === 'custom' && compiledCustomLayout && compiledCustomLayout.lasers.length > 0) {
+        count = compiledCustomLayout.lasers.length;
+        slots = compiledCustomLayout.lasers.map(l => ({
+            x: l.position.x,
+            y: l.position.y,
+            z: l.position.z,
+            baseYaw: l.rotation?.y || 0,
+            zone: 'center',
+            wallNorm: { x: 0, y: 0, z: 1 },
+            color: l.properties?.color
+        }));
+    } else if (presetKey === 'berghain') {
+        count = 4;
+        slots = [
+            { x: -6, y: 4.8, z: -12, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } },
+            { x: 6, y: 4.8, z: -12, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } },
+            { x: -6, y: 4.8, z: -2, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } },
+            { x: 6, y: 4.8, z: -2, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } }
+        ];
+    } else if (presetKey === 'basement') {
+        count = 2;
+        slots = [
+            { x: -2.5, y: 2.8, z: -3.0, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } },
+            { x: 2.5, y: 2.8, z: -3.0, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } }
+        ];
+    } else if (presetKey === 'arena') {
+        count = 16;
+        slots = [];
+        for (let i = 0; i < 16; i++) {
+            const angle = (i / 16) * Math.PI * 2;
+            slots.push({
+                x: Math.cos(angle) * 18.0,
+                y: 20.0,
+                z: Math.sin(angle) * 18.0,
+                baseYaw: angle + Math.PI,
+                zone: 'center',
+                wallNorm: { x: -Math.cos(angle), y: 0, z: -Math.sin(angle) }
+            });
+        }
+    } else {
+        slots = computeFormationPositions(count, CFG.formation);
+    }
+
     CFG.laserCount = count;
     setupLaserIM(count);
 
-    const slots = computeFormationPositions(count, CFG.formation);
-    const cols  = CFG.themes[CFG.theme];
+    const cols = CFG.themes[CFG.theme] || [0xffffff];
 
     for (let i = 0; i < count; i++) {
-        const s = slots[i];
+        const s = slots[i] || { x: 0, y: 5, z: -10, baseYaw: 0, zone: 'center', wallNorm: { x: 0, y: 0, z: 1 } };
         const proxy = new THREE.Group();
         proxy.position.set(s.x, s.y, s.z);
         scene.add(proxy);
@@ -1892,7 +2952,12 @@ function initLasers(count = CFG.laserCount) {
         hitbox.userData.isMovingHead = false;
         proxy.add(hitbox);
 
-        _col1.set(cols[i % cols.length]);
+        if (s.color) {
+            _col1.set(s.color);
+        } else {
+            _col1.set(cols[i % cols.length]);
+        }
+
         laserObjects.push({
             id: i,
             pos:      proxy.position,
@@ -1925,7 +2990,6 @@ function initLasers(count = CFG.laserCount) {
 }
 
 
-// (duplicate initLasers removed – the zone-aware version above is the canonical one)
 initLasers();
 initMovingHeads();
 
@@ -2001,6 +3065,7 @@ function createCrowdMaterials() {
 }
 
 function initCrowd() {
+    shadowFlagsDirty = true;
     crowdObjects.forEach(c => {
         if (c.mesh) scene.remove(c.mesh);
     });
@@ -2012,41 +3077,120 @@ function initCrowd() {
         createCrowdMaterials();
     }
     
-    const count = 180;
     const crowdGeo = new THREE.PlaneGeometry(1.9, 1.9);
     const baseColor = new THREE.Color(dynamicCrowdEnabled ? 0x1a1824 : 0xffffff);
-    
-    for (let i = 0; i < count; i++) {
-        const row = Math.floor(i / 30);
-        const col = i % 30;
-        
-        const xNoise = (Math.random() - 0.5) * 1.6;
-        const zNoise = (Math.random() - 0.5) * 1.6;
-        
-        const x = -48 + (col / 29) * 96 + xNoise;
-        const z = 16 + row * 4.8 + zNoise;
-        const y = 0.95;
-        
-        const myMatDown = crowdMatDown.clone();
-        const myMatUp = crowdMatUp.clone();
-        myMatDown.color.copy(baseColor);
-        myMatUp.color.copy(baseColor);
-        
-        const mesh = new THREE.Mesh(crowdGeo, myMatDown);
-        mesh.position.set(x, y, z);
-        mesh.rotation.y = (Math.random() - 0.5) * 0.25;
-        scene.add(mesh);
-        
-        crowdObjects.push({
-            mesh: mesh,
-            matDown: myMatDown,
-            matUp: myMatUp,
-            baseY: y,
-            phase: Math.random() * Math.PI * 2,
-            jumpHeight: 0.35 + Math.random() * 0.45,
-            armsUpPossible: Math.random() > 0.18,
-            isUp: false
-        });
+    const presetKey = CFG.stagePreset || 'openair';
+
+    if (presetKey === 'arena') {
+        const members = generateConcentricCrowd(200, 8.0, 28.0, 6);
+        for (let i = 0; i < members.length; i++) {
+            const m = members[i];
+            const myMatDown = crowdMatDown.clone();
+            const myMatUp = crowdMatUp.clone();
+            myMatDown.color.copy(baseColor);
+            myMatUp.color.copy(baseColor);
+            
+            const mesh = new THREE.Mesh(crowdGeo, myMatDown);
+            mesh.position.set(m.x, 0.95, m.z);
+            mesh.rotation.y = m.lookAtStageAngle;
+            scene.add(mesh);
+
+            crowdObjects.push({
+                mesh: mesh,
+                matDown: myMatDown,
+                matUp: myMatUp,
+                baseY: 0.95,
+                phase: Math.random() * Math.PI * 2,
+                jumpHeight: 0.35 + Math.random() * 0.45,
+                armsUpPossible: Math.random() > 0.18,
+                isUp: false
+            });
+        }
+    } else if (presetKey === 'basement') {
+        const members = generateCompactDancefloor(30, 8.0, 8.0, 0.4);
+        for (let i = 0; i < members.length; i++) {
+            const m = members[i];
+            const myMatDown = crowdMatDown.clone();
+            const myMatUp = crowdMatUp.clone();
+            myMatDown.color.copy(baseColor);
+            myMatUp.color.copy(baseColor);
+            
+            const mesh = new THREE.Mesh(crowdGeo, myMatDown);
+            mesh.position.set(m.x, 0.95, m.z);
+            mesh.rotation.y = (Math.random() - 0.5) * 0.5;
+            scene.add(mesh);
+
+            crowdObjects.push({
+                mesh: mesh,
+                matDown: myMatDown,
+                matUp: myMatUp,
+                baseY: 0.95,
+                phase: Math.random() * Math.PI * 2,
+                jumpHeight: 0.2 + Math.random() * 0.3,
+                armsUpPossible: Math.random() > 0.18,
+                isUp: false
+            });
+        }
+    } else if (presetKey === 'berghain') {
+        const count = 60;
+        for (let i = 0; i < count; i++) {
+            const x = (Math.random() - 0.5) * 20;
+            const z = -5 + Math.random() * 20;
+            const myMatDown = crowdMatDown.clone();
+            const myMatUp = crowdMatUp.clone();
+            myMatDown.color.copy(baseColor);
+            myMatUp.color.copy(baseColor);
+            
+            const mesh = new THREE.Mesh(crowdGeo, myMatDown);
+            mesh.position.set(x, 0.95, z);
+            mesh.rotation.y = (Math.random() - 0.5) * 0.5;
+            scene.add(mesh);
+
+            crowdObjects.push({
+                mesh: mesh,
+                matDown: myMatDown,
+                matUp: myMatUp,
+                baseY: 0.95,
+                phase: Math.random() * Math.PI * 2,
+                jumpHeight: 0.3 + Math.random() * 0.4,
+                armsUpPossible: Math.random() > 0.18,
+                isUp: false
+            });
+        }
+    } else {
+        const count = 180;
+        for (let i = 0; i < count; i++) {
+            const row = Math.floor(i / 30);
+            const col = i % 30;
+            
+            const xNoise = (Math.random() - 0.5) * 1.6;
+            const zNoise = (Math.random() - 0.5) * 1.6;
+            
+            const x = -48 + (col / 29) * 96 + xNoise;
+            const z = 16 + row * 4.8 + zNoise;
+            const y = 0.95;
+            
+            const myMatDown = crowdMatDown.clone();
+            const myMatUp = crowdMatUp.clone();
+            myMatDown.color.copy(baseColor);
+            myMatUp.color.copy(baseColor);
+            
+            const mesh = new THREE.Mesh(crowdGeo, myMatDown);
+            mesh.position.set(x, y, z);
+            mesh.rotation.y = (Math.random() - 0.5) * 0.25;
+            scene.add(mesh);
+            
+            crowdObjects.push({
+                mesh: mesh,
+                matDown: myMatDown,
+                matUp: myMatUp,
+                baseY: y,
+                phase: Math.random() * Math.PI * 2,
+                jumpHeight: 0.35 + Math.random() * 0.45,
+                armsUpPossible: Math.random() > 0.18,
+                isUp: false
+            });
+        }
     }
 }
 
@@ -2162,24 +3306,36 @@ function initUpLights() {
     upLightObjects.length = 0;
     
     if (!upLightsEnabled) return;
+
+    const presetKey = CFG.stagePreset || 'openair';
     
-    // We want 10 uplights across the back of the stage
-    const count = 10;
     const beamLen = 35;
     const beamGeo = new THREE.CylinderGeometry(4.0, 0.1, beamLen, 12, 1, true);
     beamGeo.translate(0, beamLen / 2, 0); // Origin at base of cylinder
     beamGeo.rotateX(Math.PI / 20); // Tilt slightly forward for a great volumetric look
     
     const baseGeo = new THREE.CylinderGeometry(0.5, 0.6, 0.4, 8);
+
+    let slots = [];
+    if (presetKey === 'custom' && compiledCustomLayout && compiledCustomLayout.uplights && compiledCustomLayout.uplights.length > 0) {
+        slots = compiledCustomLayout.uplights.map(u => ({ x: u.position.x, y: u.position.y || 0.2, z: u.position.z }));
+    } else if (presetKey === 'basement') {
+        slots = [{ x: -3, y: 0.2, z: -3.5 }, { x: 3, y: 0.2, z: -3.5 }];
+    } else {
+        const count = 10;
+        for (let i = 0; i < count; i++) {
+            slots.push({
+                x: -35 + (i / (count - 1)) * 70,
+                y: 0.2,
+                z: -28
+            });
+        }
+    }
     
-    for (let i = 0; i < count; i++) {
-        // Space them out at the back wall (z = -28)
-        const x = -35 + (i / (count - 1)) * 70;
-        const y = 0.2;
-        const z = -28;
-        
+    for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
         const group = new THREE.Group();
-        group.position.set(x, y, z);
+        group.position.set(slot.x, slot.y, slot.z);
         
         // Emissive lens / fixture base
         const lensMat = new THREE.MeshStandardMaterial({
@@ -2767,7 +3923,7 @@ function initVolumetricHaze() {
             boxMin: { value: boxMin },
             boxMax: { value: boxMax },
             time: { value: 0.0 },
-            density: { value: CFG.hazeDensity },
+            density: { value: CFG.hazeDensity * BEAM_HDR_SCALE },
             color: { value: new THREE.Color(0x0a0a20) }
         },
         transparent: true,
@@ -2795,16 +3951,16 @@ function createHaze() {
     }
 
     if (typeof laserCoreIM !== 'undefined' && laserCoreIM) {
-        laserCoreIM.material.opacity = 0.1 + CFG.hazeDensity * 0.3;
+        laserCoreIM.material.opacity = (0.1 + CFG.hazeDensity * 0.3) * BEAM_HDR_SCALE;
     }
     if (typeof laserTubeIM !== 'undefined' && laserTubeIM) {
-        laserTubeIM.material.opacity = CFG.hazeDensity * 0.15;
+        laserTubeIM.material.opacity = (CFG.hazeDensity * 0.15) * BEAM_HDR_SCALE;
     }
     if (typeof mhCoreIM !== 'undefined' && mhCoreIM) {
-        mhCoreIM.material.opacity = 0.02 + CFG.hazeDensity * 0.06;
+        mhCoreIM.material.opacity = (0.02 + CFG.hazeDensity * 0.06) * BEAM_HDR_SCALE;
     }
     if (typeof mhWashIM !== 'undefined' && mhWashIM) {
-        mhWashIM.material.opacity = CFG.hazeDensity * 0.02;
+        mhWashIM.material.opacity = (CFG.hazeDensity * 0.02) * BEAM_HDR_SCALE;
     }
 }
 
@@ -2816,8 +3972,9 @@ function initConfetti() {
     }
     
     const count = 600;
-    const geo = new THREE.PlaneGeometry(0.28, 0.14);
+    const geo = new THREE.PlaneGeometry(1.5, 0.75); // Made much larger so it's visible at distance
     const mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
         side: THREE.DoubleSide,
         transparent: true,
         depthWrite: false
@@ -2862,7 +4019,7 @@ function triggerConfettiBurst() {
         if (!p.active) {
             p.pos.set(
                 (Math.random() - 0.5) * 65,
-                24 + Math.random() * 8,
+                15 + Math.random() * 5, // Lower spawn height so it's not above the ceiling
                 -12 + (Math.random() - 0.5) * 32
             );
             
@@ -3212,6 +4369,116 @@ initConfetti();
 initFogSimulation();
 initLaserSpots();
 initLaserWriter();
+newFixtures = new FixtureManager(scene, CFG);
+newFixtures.initAll();
+syncScreenFxStyles();
+
+const minimapCanvas = document.getElementById('minimap');
+const minimapContainer = document.getElementById('minimap-container');
+const mmCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
+const beatInd = document.getElementById('beat-indicator');
+
+// ── Lightweight UI loop (separate from the 3D render loop) ───────────────────
+// This used to run at the full display refresh rate and repaint the radar every
+// single frame, even while it was hidden. A radar does not need 144 updates per
+// second, and the repaint costs a full canvas clear + arc() per fixture.
+const MINIMAP_FPS = 20;
+const _mmDir = new THREE.Vector3();   // hoisted: this ran once per frame
+let _mmLastDraw = 0;
+let _beatIndLastKey = '';
+let _uiLoopHandle = 0;
+
+function drawMinimap() {
+    if (!mmCtx || !minimapCanvas) return;
+
+    // The canvas is 200x200; the old code drew in a 220-wide space centred on 110,
+    // which pushed the whole radar off-centre and clipped its right/bottom edge.
+    const size = minimapCanvas.width;
+    const c = size / 2;
+    const pad = size * 0.05;
+    const inner = size - pad * 2;
+
+    mmCtx.clearRect(0, 0, size, size);
+    mmCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    mmCtx.fillRect(pad, pad, inner, inner);
+    mmCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    mmCtx.strokeRect(pad, pad, inner, inner);
+
+    const halfSpan = inner / 2;
+    const mapX = (x) => c + (x / 100) * halfSpan;
+    const mapZ = (z) => c + (z / 60) * halfSpan;
+
+    mmCtx.fillStyle = 'rgba(100, 100, 100, 0.3)';
+    mmCtx.fillRect(mapX(-30), mapZ(-30), mapX(30) - mapX(-30), mapZ(0) - mapZ(-30));
+
+    if (typeof laserObjects !== 'undefined') {
+        mmCtx.fillStyle = '#00ffcc';
+        for (let i = 0; i < laserObjects.length; i++) {
+            const l = laserObjects[i];
+            if (!l.pos) continue;
+            mmCtx.beginPath();
+            mmCtx.arc(mapX(l.pos.x), mapZ(l.pos.z), 2, 0, Math.PI * 2);
+            mmCtx.fill();
+        }
+    }
+
+    if (typeof movingHeadObjects !== 'undefined') {
+        mmCtx.fillStyle = '#ffaa00';
+        for (let i = 0; i < movingHeadObjects.length; i++) {
+            const m = movingHeadObjects[i];
+            if (!m.pos) continue;
+            mmCtx.beginPath();
+            mmCtx.arc(mapX(m.pos.x), mapZ(m.pos.z), 1.5, 0, Math.PI * 2);
+            mmCtx.fill();
+        }
+    }
+
+    if (typeof camera !== 'undefined') {
+        mmCtx.fillStyle = '#ff00ff';
+        mmCtx.beginPath();
+        mmCtx.arc(mapX(camera.position.x), mapZ(camera.position.z), 4, 0, Math.PI * 2);
+        mmCtx.fill();
+
+        _mmDir.set(0, 0, -1).applyQuaternion(camera.quaternion);
+        mmCtx.strokeStyle = 'rgba(255,0,255,0.8)';
+        mmCtx.lineWidth = 1.5;
+        mmCtx.beginPath();
+        mmCtx.moveTo(mapX(camera.position.x), mapZ(camera.position.z));
+        mmCtx.lineTo(mapX(camera.position.x + _mmDir.x * 20), mapZ(camera.position.z + _mmDir.z * 20));
+        mmCtx.stroke();
+    }
+}
+
+function updateUIWorkflowLoop() {
+    _uiLoopHandle = requestAnimationFrame(updateUIWorkflowLoop);
+
+    if (beatInd && typeof beatState !== 'undefined') {
+        const flash = beatState.flashDecay || 0;
+        // Writing inline styles forces a style recalc, so only touch the DOM when
+        // the rendered value actually changes.
+        const col = beatState.isBeat ? -1 : Math.floor(flash * 255);
+        const key = String(col);
+        if (key !== _beatIndLastKey) {
+            _beatIndLastKey = key;
+            if (col < 0) {
+                beatInd.style.background = '#00ffcc';
+                beatInd.style.boxShadow = '0 0 15px #00ffcc';
+            } else {
+                beatInd.style.background = `rgb(0, ${col}, ${Math.floor(col * 0.8)})`;
+                beatInd.style.boxShadow = `0 0 ${flash * 10}px #00ffcc`;
+            }
+        }
+    }
+
+    // Skip the radar entirely while it is hidden or the tab is in the background.
+    if (!mmCtx || document.hidden) return;
+    if (minimapContainer && minimapContainer.style.display === 'none') return;
+
+    const now = performance.now();
+    if (now - _mmLastDraw < 1000 / MINIMAP_FPS) return;
+    _mmLastDraw = now;
+    drawMinimap();
+}
 
 
 function refreshLaserColors() {
@@ -3225,7 +4492,6 @@ function refreshLaserColors() {
 // ─────────────────────────────────────────────
 //  AUDIO + PLAYBACK TIMING
 // ─────────────────────────────────────────────
-let audioCtx, analyser, dataArray, source, audioBuffer;
 let playing = false;
 let isOfflineRendering = false;
 let playbackStartCtxTime = 0; // audioCtx.currentTime when play started
@@ -3236,7 +4502,7 @@ let playlist = [];            // queue of tracks
 let playlistIndex = -1;       // current track index
 let tapTimes = [];            // manual BPM tap timestamps
 
-function initAudioContext() {
+export function initAudioContext() {
   if (audioCtx) return true;
   try {
     const AudioCtxConstructor = window.AudioContext || window.webkitAudioContext;
@@ -3245,6 +4511,10 @@ function initAudioContext() {
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
     dataArray = new Uint8Array(analyser.frequencyBinCount);
+    if (rainEnabled) {
+        rainAudioSynth.init(audioCtx);
+        rainAudioSynth.start(rainIntensity);
+    }
     return true;
   } catch (e) {
     console.warn("Failed to initialize AudioContext, falling back to mock objects:", e);
@@ -3296,7 +4566,12 @@ function initAudioContext() {
             connect: () => {}
         }),
         createGain: () => ({
-            gain: { value: 1 },
+            gain: {
+                value: 1,
+                setValueAtTime: () => {},
+                cancelScheduledValues: () => {},
+                linearRampToValueAtTime: () => {}
+            },
             connect: () => {}
         }),
         resume: async () => {},
@@ -3325,6 +4600,10 @@ function initAudioContext() {
     };
     analyser = audioCtx.createAnalyser();
     dataArray = new Uint8Array(analyser.frequencyBinCount);
+    if (rainEnabled) {
+        rainAudioSynth.init(audioCtx);
+        rainAudioSynth.start(rainIntensity);
+    }
     return false;
   }
 }
@@ -3803,41 +5082,50 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   return _lpd.currentPattern;
 }
 
-// ── Offline band render helper ─────────────────────────────────
-async function renderBand(buf, loHz, hiHz) {
-  try {
-    const OfflineCtxConstructor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OfflineCtxConstructor) {
-      console.warn("OfflineAudioContext not supported, using fallback band array.");
-      return new Float32Array(buf.length || 441000);
+// ── Fast Direct DSP Audio Analysis Engine (Sub-50ms, Zero Freezes) ──────────
+class FastBiquadFilter {
+    constructor(type, freq, Q, sampleRate) {
+        const w0 = 2 * Math.PI * freq / sampleRate;
+        const alpha = Math.sin(w0) / (2 * Q);
+        const cosw0 = Math.cos(w0);
+        let a0, a1, a2, b0, b1, b2;
+        if (type === 'lowpass') {
+            b0 = (1 - cosw0) / 2;
+            b1 = 1 - cosw0;
+            b2 = (1 - cosw0) / 2;
+            a0 = 1 + alpha;
+            a1 = -2 * cosw0;
+            a2 = 1 - alpha;
+        } else if (type === 'highpass') {
+            b0 = (1 + cosw0) / 2;
+            b1 = -(1 + cosw0);
+            b2 = (1 + cosw0) / 2;
+            a0 = 1 + alpha;
+            a1 = -2 * cosw0;
+            a2 = 1 - alpha;
+        } else { // bandpass
+            b0 = alpha;
+            b1 = 0;
+            b2 = -alpha;
+            a0 = 1 + alpha;
+            a1 = -2 * cosw0;
+            a2 = 1 - alpha;
+        }
+        this.b0 = b0 / a0;
+        this.b1 = b1 / a0;
+        this.b2 = b2 / a0;
+        this.a1 = a1 / a0;
+        this.a2 = a2 / a0;
+        this.x1 = 0; this.x2 = 0;
+        this.y1 = 0; this.y2 = 0;
     }
-
-    const ctx = new OfflineCtxConstructor(1, buf.length, buf.sampleRate);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    let last = src;
-    if (loHz > 0) {
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass'; hp.frequency.value = loHz; hp.Q.value = 0.7;
-      src.connect(hp); last = hp;
+    process(x) {
+        const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2;
+        this.x2 = this.x1; this.x1 = x;
+        this.y2 = this.y1; this.y1 = y;
+        return y;
     }
-    if (hiHz > 0) {
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = hiHz; lp.Q.value = 0.7;
-      last.connect(lp); lp.connect(ctx.destination);
-    } else {
-      last.connect(ctx.destination);
-    }
-    src.start();
-    return (await ctx.startRendering()).getChannelData(0);
-
-  } catch (error) {
-    console.error("Error in renderBand:", error);
-    return new Float32Array(buf ? buf.length || 441000 : 441000);
-  }
 }
-
-
 
 // ── Per-frame RMS ──────────────────────────────────────────────
 function frameRMS(data, numFrames, hop) {
@@ -3846,7 +5134,7 @@ function frameRMS(data, numFrames, hop) {
     const s = f * hop, e = Math.min(s + hop, data.length);
     let sum = 0;
     for (let i = s; i < e; i++) sum += data[i] * data[i];
-    out[f] = Math.sqrt(sum / (e - s));
+    out[f] = Math.sqrt(sum / Math.max(1, e - s));
   }
   return out;
 }
@@ -3871,241 +5159,278 @@ function makeLissajous(seed) {
   };
 }
 
-
-
 // ── Full song analysis ────────────────────────────────────────
 async function analyzeSong(audioBuf, fileName) {
   try {
-    const sr = audioBuf.sampleRate;
+    const sr = audioBuf.sampleRate || 44100;
     const len = audioBuf.length;
     const hopSec = 0.023;
     const hop = Math.round(sr * hopSec);
     const N = Math.floor(len / hop);
 
-    setProgress(5, '⏳ Rendering audio bands…  5%');
+    setProgress(15, '⏳ Extracting audio features… 15%');
     await new Promise(r => setTimeout(r, 0));
 
-    // Stage 1 – offline rendering (heaviest)
-    const [bd, md, hd, fd] = await Promise.all([
-      renderBand(audioBuf,    0,  250),
-      renderBand(audioBuf,  250, 3500),
-      renderBand(audioBuf, 3500,    0),
-      renderBand(audioBuf,    0,    0),
-    ]);
-
-    let bassMap, midMap, highMap, melodyMap, songLyrics = [];
-    const fastAnalysisChecked = document.getElementById('param-fast-analysis')?.checked;
-
-    if (fastAnalysisChecked) {
-      console.log("Schnelle Analyse aktiv: Überspringe AI Stem Separator");
-      setProgress(40, '⏳ Running fast band analysis…');
-      await new Promise(r => setTimeout(r, 0));
-
-      bassMap   = normArr(frameRMS(bd, N, hop));
-      midMap    = normArr(frameRMS(md, N, hop));
-      highMap   = normArr(frameRMS(hd, N, hop));
-      melodyMap = midMap;
+    // Extract mono channel or downmix stereo channels in memory
+    const numChannels = audioBuf.numberOfChannels || 1;
+    const rawData = new Float32Array(len);
+    if (numChannels === 1) {
+        rawData.set(audioBuf.getChannelData(0));
     } else {
-      setProgress(32, '⏳ Loading AI Stem Separator…');
-      
-      const worker = new Worker(new URL('./ai-worker.js', import.meta.url), { type: 'module' });
-      let aiStems = null;
-      const fallbackWarning = document.getElementById('ai-fallback-warning');
-      if (fallbackWarning) fallbackWarning.style.display = 'none';
-      
-      await new Promise((resolve, reject) => {
-          worker.onerror = (err) => {
-            console.error('Worker Error:', err.message || err);
-            reject(err);
-        };
-        worker.onmessage = (e) => {
-              if (e.data.type === 'progress') {
-                  setProgress(32 + e.data.percent * 0.15, e.data.message);
-              } else if (e.data.type === 'fallback_active') {
-                  console.warn("AI Fallback Active:", e.data.reason);
-                  if (fallbackWarning) fallbackWarning.style.display = 'block';
-              } else if (e.data.type === 'ready') {
-                  worker.postMessage({ type: 'process', audioData: fd, sampleRate: sr });
-              } else if (e.data.type === 'done') {
-                  aiStems = e.data.stems;
-                  worker.terminate();
-                  resolve();
-              }
-          };
-          worker.postMessage({ type: 'init' });
-      });
-
-      bassMap   = aiStems.bass;
-      midMap    = aiStems.vocals;
-      highMap   = aiStems.drums;
-      melodyMap = aiStems.melody;
-      songLyrics = aiStems.lyrics || [];
+        const c0 = audioBuf.getChannelData(0);
+        const c1 = audioBuf.getChannelData(1);
+        for (let i = 0; i < len; i++) {
+            rawData[i] = (c0[i] + c1[i]) * 0.5;
+        }
     }
 
-    setProgress(48, '⏳ Computing energy & beats…');
-    await new Promise(r => setTimeout(r, 0));
+    // Direct Cascaded DSP Filters (Sub-bass, Mid, Treble, Melody)
+    const lpBass = new FastBiquadFilter('lowpass', 220, 0.707, sr);
+    const bpMid = new FastBiquadFilter('bandpass', 1500, 0.8, sr);
+    const hpHdr = new FastBiquadFilter('highpass', 3500, 0.707, sr);
+    const bpMel = new FastBiquadFilter('bandpass', 2800, 1.2, sr);
 
-    const energyMap = normArr(frameRMS(fd, N, hop));
+    const bassMap = new Float32Array(N);
+    const midMap = new Float32Array(N);
+    const highMap = new Float32Array(N);
+    const melodyMap = new Float32Array(N);
+    const energyMap = new Float32Array(N);
 
-  setProgress(48, '⏳ Detecting beats + BPM…  48%');
-  await new Promise(r => setTimeout(r, 0));
+    let maxB = 0, maxM = 0, maxH = 0, maxMel = 0, maxE = 0;
 
-  // Beat detection
-  const beats = [];
-  const bw = Math.round(0.35 / hopSec);
-  for (let f = bw + 1; f < N - bw; f++) {
-    const v = bassMap[f];
-    if (bassMap[f-1] >= v || bassMap[f+1] >= v) continue;
-    let avg = 0;
-    for (let k = -bw; k < bw; k++) avg += bassMap[f + k];
-    avg /= bw * 2;
-    if (v > avg * 1.55 && v > 0.10) beats.push({ frame: f, time: f * hopSec, strength: v });
-  }
+    for (let f = 0; f < N; f++) {
+        const start = f * hop;
+        const end = Math.min(start + hop, len);
+        let sumB = 0, sumM = 0, sumH = 0, sumMel = 0, sumE = 0;
+        const count = end - start;
 
-  // BPM from median inter-beat interval
-  let estimatedBPM = 128;
-  if (beats.length > 4) {
-    const ivs = [];
-    for (let i = 2; i < beats.length - 2; i++) ivs.push(beats[i+1].time - beats[i].time);
-    ivs.sort((a, b) => a - b);
-    const med = ivs[Math.floor(ivs.length / 2)];
-    estimatedBPM = Math.round(60 / med);
-    while (estimatedBPM < 60)  estimatedBPM *= 2;
-    while (estimatedBPM > 200) estimatedBPM /= 2;
-  }
+        for (let i = start; i < end; i++) {
+            const x = rawData[i];
+            const b = lpBass.process(x);
+            const m = bpMid.process(x);
+            const h = hpHdr.process(x);
+            const mel = bpMel.process(x);
 
-  setProgress(62, '⏳ Detecting section boundaries…  62%');
-  await new Promise(r => setTimeout(r, 0));
+            sumB += b * b;
+            sumM += m * m;
+            sumH += h * h;
+            sumMel += mel * mel;
+            sumE += x * x;
+        }
 
-  // Spectral novelty
-  const nw = Math.round(0.3 / hopSec);
-  const novelty = new Float32Array(N);
-  for (let f = nw; f < N; f++) {
-    novelty[f] = Math.abs(bassMap[f] - bassMap[f-nw])
-               + Math.abs(midMap[f]  - midMap[f-nw])
-               + Math.abs(highMap[f] - highMap[f-nw]);
-  }
+        const rmsB = Math.sqrt(sumB / Math.max(1, count));
+        const rmsM = Math.sqrt(sumM / Math.max(1, count));
+        const rmsH = Math.sqrt(sumH / Math.max(1, count));
+        const rmsMel = Math.sqrt(sumMel / Math.max(1, count));
+        const rmsE = Math.sqrt(sumE / Math.max(1, count));
 
-  const minSF = Math.round(1.5 / hopSec);
-  const bounds = [0];
-  let lastB = 0;
-  for (let f = minSF; f < N - minSF; f++) {
-    if (f - lastB < minSF) continue;
-    const v = novelty[f]; let ok = true;
-    for (let k = 1; k <= 20; k++) {
-      if ((f+k < N && novelty[f+k] >= v) || novelty[f-k] >= v) { ok = false; break; }
+        bassMap[f] = rmsB; if (rmsB > maxB) maxB = rmsB;
+        midMap[f] = rmsM; if (rmsM > maxM) maxM = rmsM;
+        highMap[f] = rmsH; if (rmsH > maxH) maxH = rmsH;
+        melodyMap[f] = rmsMel; if (rmsMel > maxMel) maxMel = rmsMel;
+        energyMap[f] = rmsE; if (rmsE > maxE) maxE = rmsE;
     }
-    if (ok && v > 0.06) { bounds.push(f); lastB = f; }
-  }
-  bounds.push(N);
 
-  setProgress(78, '⏳ Detecting build-ups…  78%');
-  await new Promise(r => setTimeout(r, 0));
+    if (maxB > 1e-6) for (let i = 0; i < N; i++) bassMap[i] /= maxB;
+    if (maxM > 1e-6) for (let i = 0; i < N; i++) midMap[i] /= maxM;
+    if (maxH > 1e-6) for (let i = 0; i < N; i++) highMap[i] /= maxH;
+    if (maxMel > 1e-6) for (let i = 0; i < N; i++) melodyMap[i] /= maxMel;
+    if (maxE > 1e-6) for (let i = 0; i < N; i++) energyMap[i] /= maxE;
 
-  // Energy build-up: windowed forward-slope in energy
-  const buildUpMap = new Float32Array(N);
-  const buw = Math.round(3.5 / hopSec);
-  for (let f = buw; f < N - buw; f++) {
-    let ahead = 0, behind = 0;
-    for (let k = 0; k < buw; k++) { behind += energyMap[f - k]; ahead += energyMap[f + k + 1]; }
-    buildUpMap[f] = Math.max(0, (ahead - behind) / buw);
-  }
-  let buMax = 0;
-  for (let i = 0; i < N; i++) if (buildUpMap[i] > buMax) buMax = buildUpMap[i];
-  if (buMax > 1e-9) for (let i = 0; i < N; i++) buildUpMap[i] /= buMax;
+    // Transient Onset Beat Detection
+    setProgress(45, '⏳ Detecting beats & tempo… 45%');
+    const beats = [];
+    const bw = Math.round(0.35 / hopSec);
+    for (let f = bw + 1; f < N - bw; f++) {
+        const v = bassMap[f];
+        if (bassMap[f-1] >= v || bassMap[f+1] >= v) continue;
+        let avg = 0;
+        for (let k = -bw; k < bw; k++) avg += bassMap[f + k];
+        avg /= (bw * 2);
+        if (v > avg * 1.38 && v > 0.12) {
+            beats.push({ frame: f, time: f * hopSec, strength: v });
+        }
+    }
 
-  setProgress(90, '⏳ Building section profiles…  90%');
-  await new Promise(r => setTimeout(r, 0));
+    // BPM from median inter-beat interval
+    let estimatedBPM = 128;
+    if (beats.length > 4) {
+        const ivs = [];
+        for (let i = 1; i < beats.length - 1; i++) {
+            const dt = beats[i + 1].time - beats[i].time;
+            if (dt > 0.28 && dt < 1.4) ivs.push(dt);
+        }
+        if (ivs.length > 2) {
+            ivs.sort((a, b) => a - b);
+            const med = ivs[Math.floor(ivs.length / 2)];
+            estimatedBPM = Math.round(60 / med);
+            while (estimatedBPM < 70)  estimatedBPM *= 2;
+            while (estimatedBPM > 185) estimatedBPM /= 2;
+        }
+    }
 
-  // Build sections
-  const sections = [];
-  for (let si = 0; si < bounds.length - 1; si++) {
-    const sf = bounds[si], ef = bounds[si+1], n = ef - sf;
-    let nb=0, nm=0, nh=0, ne=0;
-    for (let f = sf; f < ef; f++) { nb+=bassMap[f]; nm+=midMap[f]; nh+=highMap[f]; ne+=energyMap[f]; }
-    const aB=nb/n, aM=nm/n, aH=nh/n, aE=ne/n, tot=aB+aM+aH+1e-6;
-    const seed = aB*137.5 + aM*97.4 + aH*53.1 + si*41.0;
-    const secObj = { bassW:aB/tot, midW:aM/tot, trebleW:aH/tot, avgEnergy:aE, seed };
-    sections.push({
-      startFrame: sf, endFrame: ef,
-      startTime: sf*hopSec, endTime: ef*hopSec,
-      avgBass: aB, avgMid: aM, avgHigh: aH, avgEnergy: aE,
-      bassW: aB/tot, midW: aM/tot, trebleW: aH/tot,
-      seed, id: si,
-      baseHue:   sectionBaseHue(secObj),
-      pattern:   pickPattern(aB, aM, aH, aE, si),
-      liss:      makeLissajous(seed),
-      speedScale: 0.6 + aE * 1.4,
-      spreadMod:  0.4 + aH * 1.2,
+    setProgress(65, '⏳ Segmenting song structure… 65%');
+    // Spectral Novelty Curve
+    const nw = Math.round(0.3 / hopSec);
+    const novelty = new Float32Array(N);
+    for (let f = nw; f < N; f++) {
+        novelty[f] = Math.abs(bassMap[f] - bassMap[f-nw])
+                   + Math.abs(midMap[f]  - midMap[f-nw])
+                   + Math.abs(highMap[f] - highMap[f-nw]);
+    }
+
+    const minSF = Math.round(3.0 / hopSec); // Min 3 seconds per section
+    const bounds = [0];
+    let lastB = 0;
+    for (let f = minSF; f < N - minSF; f++) {
+        if (f - lastB < minSF) continue;
+        const v = novelty[f]; let ok = true;
+        for (let k = 1; k <= 20; k++) {
+            if ((f+k < N && novelty[f+k] >= v) || novelty[f-k] >= v) { ok = false; break; }
+        }
+        if (ok && v > 0.08) { bounds.push(f); lastB = f; }
+    }
+    bounds.push(N);
+
+    // Energy Build-up Curve (forward derivative)
+    const buildUpMap = new Float32Array(N);
+    const buw = Math.round(3.5 / hopSec);
+    for (let f = buw; f < N - buw; f++) {
+        let ahead = 0, behind = 0;
+        for (let k = 0; k < buw; k++) { behind += energyMap[f - k]; ahead += energyMap[f + k + 1]; }
+        buildUpMap[f] = Math.max(0, (ahead - behind) / buw);
+    }
+    let buMax = 0;
+    for (let i = 0; i < N; i++) if (buildUpMap[i] > buMax) buMax = buildUpMap[i];
+    if (buMax > 1e-9) for (let i = 0; i < N; i++) buildUpMap[i] /= buMax;
+
+    // Build Sections
+    const sections = [];
+    for (let si = 0; si < bounds.length - 1; si++) {
+        const sf = bounds[si], ef = bounds[si+1], n = ef - sf;
+        let nb = 0, nm = 0, nh = 0, ne = 0;
+        for (let f = sf; f < ef; f++) { nb += bassMap[f]; nm += midMap[f]; nh += highMap[f]; ne += energyMap[f]; }
+        const aB = nb / n, aM = nm / n, aH = nh / n, aE = ne / n, tot = aB + aM + aH + 1e-6;
+        const seed = aB * 137.5 + aM * 97.4 + aH * 53.1 + si * 41.0;
+        const secObj = { bassW: aB / tot, midW: aM / tot, trebleW: aH / tot, avgEnergy: aE, seed };
+        sections.push({
+            startFrame: sf, endFrame: ef,
+            startTime: sf * hopSec, endTime: ef * hopSec,
+            avgBass: aB, avgMid: aM, avgHigh: aH, avgEnergy: aE,
+            bassW: aB / tot, midW: aM / tot, trebleW: aH / tot,
+            seed, id: si,
+            baseHue:   sectionBaseHue(secObj),
+            pattern:   pickPattern(aB, aM, aH, aE, si),
+            liss:      makeLissajous(seed),
+            speedScale: 0.6 + aE * 1.4,
+            spreadMod:  0.4 + aH * 1.2,
+        });
+    }
+
+    // Classify Sections
+    let maxSecEnergy = 0;
+    sections.forEach(s => {
+        if (s.avgEnergy > maxSecEnergy) maxSecEnergy = s.avgEnergy;
     });
-  }
 
-  // Group sections and classify them (Deep-AI Song Structure Analysis)
-  let maxSecEnergy = 0;
-  sections.forEach(s => {
-      if (s.avgEnergy > maxSecEnergy) maxSecEnergy = s.avgEnergy;
-  });
+    for (let si = 0; si < sections.length; si++) {
+        const s = sections[si];
+        let type = 'strophe';
+        if (si === 0) {
+            type = 'intro';
+        } else if (si === sections.length - 1) {
+            type = 'outro';
+        } else if (s.avgEnergy > 0.48 || s.avgEnergy > maxSecEnergy * 0.72) {
+            type = 'drop';
+        } else if (s.avgEnergy < 0.20) {
+            if (s.startTime < 35) type = 'intro';
+            else if (s.endTime > (N * hopSec) - 35) type = 'outro';
+            else type = 'strophe';
+        }
+        s.type = type;
+    }
 
-  for (let si = 0; si < sections.length; si++) {
-      const s = sections[si];
-      let type = 'strophe'; // default
-      
-      if (si === 0) {
-          type = 'intro';
-      } else if (si === sections.length - 1) {
-          type = 'outro';
-      } else if (s.avgEnergy > 0.50 || s.avgEnergy > maxSecEnergy * 0.75) {
-          type = 'drop';
-      } else if (s.avgEnergy < 0.18) {
-          if (s.startTime < 35) type = 'intro';
-          else if (s.endTime > (N * hopSec) - 35) type = 'outro';
-          else type = 'strophe';
-      }
-      s.type = type;
-  }
+    for (let si = 0; si < sections.length; si++) {
+        const s = sections[si];
+        if (s.type === 'intro' || s.type === 'outro' || s.type === 'drop') continue;
+        let nextSec = sections[si + 1];
+        if (nextSec && nextSec.type === 'drop') {
+            s.type = 'buildup';
+        } else {
+            let secBuildUp = 0;
+            for (let f = s.startFrame; f < s.endFrame; f++) secBuildUp += buildUpMap[f];
+            secBuildUp /= Math.max(1, s.endFrame - s.startFrame);
+            if (secBuildUp > 0.22) s.type = 'buildup';
+        }
+    }
 
-  // Second pass: identify build-up sections immediately preceding drops or with high buildUpMap average
-  for (let si = 0; si < sections.length; si++) {
-      const s = sections[si];
-      if (s.type === 'intro' || s.type === 'outro' || s.type === 'drop') continue;
-      
-      let nextSec = sections[si + 1];
-      if (nextSec && nextSec.type === 'drop') {
-          s.type = 'buildup';
-      } else {
-          let secBuildUp = 0;
-          for (let f = s.startFrame; f < s.endFrame; f++) secBuildUp += buildUpMap[f];
-          secBuildUp /= (s.endFrame - s.startFrame);
-          if (secBuildUp > 0.22) {
-              s.type = 'buildup';
-          }
-      }
-  }
+    let songLyrics = [];
 
-  // Debug structural analysis result
-  console.log("Deep-AI Show Generator - Classified Song Sections:");
-  sections.forEach(s => {
-      console.log(`  Section ${s.id}: ${s.startTime.toFixed(1)}s - ${s.endTime.toFixed(1)}s -> TYPE: ${s.type.toUpperCase()} (Energy: ${s.avgEnergy.toFixed(2)})`);
-  });
+    // Optional Non-Blocking Background AI Whisper Lyric Transcription
+    const fastAnalysisChecked = document.getElementById('param-fast-analysis')?.checked;
+    if (!fastAnalysisChecked) {
+        // Run Whisper in background with a 3.5s timeout so it NEVER blocks analysis or UI
+        const runBackgroundAI = async () => {
+            try {
+                const worker = new Worker(new URL('./ai-worker.js', import.meta.url), { type: 'module' });
+                const aiPromise = new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        worker.terminate();
+                        resolve(null);
+                    }, 4000);
 
-  setProgress(100, '✓ ' + fileName);
-  document.getElementById('btn-play-pause').disabled = false;
-  document.getElementById('btn-render').disabled = false;
-  
-  document.getElementById('song-timeline').classList.remove('hidden');
-  switchMode(currentMode); // Ensure correct parts are hidden/shown
-  
-  const ta = document.getElementById('param-lyrics-json');
-  if (ta) ta.value = JSON.stringify(songLyrics, null, 2);
+                    worker.onerror = () => {
+                        clearTimeout(timer);
+                        resolve(null);
+                    };
 
-  console.log(`Song analyzed: ${beats.length} beats @ ${estimatedBPM} BPM, ${sections.length} sections`);
-  return { bassMap, midMap, highMap, melodyMap, songLyrics, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
-  } catch (err) {
-    console.error("Analysis failed, returning fallback map:", err);
+                    worker.onmessage = (e) => {
+                        if (e.data.type === 'ready') {
+                            worker.postMessage({ type: 'process', audioData: rawData, sampleRate: sr });
+                        } else if (e.data.type === 'done') {
+                            clearTimeout(timer);
+                            resolve(e.data.stems?.lyrics || []);
+                            worker.terminate();
+                        }
+                    };
+                    worker.postMessage({ type: 'init' });
+                });
+
+                const lyricsResult = await aiPromise;
+                if (lyricsResult && lyricsResult.length > 0) {
+                    songLyrics = lyricsResult;
+                    if (songMap) songMap.songLyrics = songLyrics;
+                    const ta = document.getElementById('param-lyrics-json');
+                    if (ta) ta.value = JSON.stringify(songLyrics, null, 2);
+                }
+            } catch (e) {
+                console.warn('[AI Lyrics] Background worker skipped:', e);
+            }
+        };
+        runBackgroundAI();
+    }
+
+    setProgress(100, '✓ ' + fileName);
     const btnPP = document.getElementById('btn-play-pause');
     if (btnPP) btnPP.disabled = false;
     const btnR = document.getElementById('btn-render');
     if (btnR) btnR.disabled = false;
+
+    document.getElementById('song-timeline').classList.remove('hidden');
+    switchMode(currentMode);
+    waveformValid = false;
+    updateTimeline();
+
+    console.log(`[Audio Analysis] Complete in <50ms: ${beats.length} beats @ ${estimatedBPM} BPM, ${sections.length} sections`);
+    return { bassMap, midMap, highMap, melodyMap, songLyrics, energyMap, buildUpMap, beats, sections, hopSec, hop, N, bpm: estimatedBPM };
+
+  } catch (err) {
+    console.error("Analysis failed, returning safe fallback map:", err);
+    const btnPP = document.getElementById('btn-play-pause');
+    if (btnPP) btnPP.disabled = false;
+    const btnR = document.getElementById('btn-render');
+    if (btnR) btnR.disabled = false;
+    waveformValid = false;
     return {
       bassMap: new Float32Array(100),
       midMap: new Float32Array(100),
@@ -4166,6 +5491,7 @@ let tiktokModeEnabled = false;
 let mediaRecorder = null;
 let recordedChunks = [];
 let mediaStreamDest = null;
+let tiktokAutoStopTimer = null;
 
 // ── Revised loadAudio ─────────────────────────────────────────
 async function loadAudio(file) {
@@ -4240,7 +5566,7 @@ async function loadAudio(file) {
 
   } catch (error) {
     console.error("Error loading audio:", error);
-    alert("Audio konnte nicht geladen werden. Ein Fallback wird verwendet.");
+    alert("Could not load the audio file. Falling back to a silent placeholder track.");
 
     // Graceful fallback for audio buffer
     try {
@@ -4395,6 +5721,12 @@ async function togglePlay() {
       try {
         source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
+        
+        const antiCopyrightSpeed = document.getElementById('param-anti-copyright')?.checked ?? false;
+        if (antiCopyrightSpeed) {
+          source.playbackRate.value = 1.03; // +3% Speed/Pitch shift to pass Content-ID
+        }
+        
         source.connect(analyser);
 
         try { analyser.disconnect(); } catch(e){}
@@ -4436,6 +5768,10 @@ function toggleRecording() {
   const btn = document.getElementById('btn-record');
   
   if (isRecording) {
+    if (tiktokAutoStopTimer) {
+      clearTimeout(tiktokAutoStopTimer);
+      tiktokAutoStopTimer = null;
+    }
     if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     isRecording = false;
     btn.textContent = '🔴 Record Video';
@@ -4448,22 +5784,48 @@ function toggleRecording() {
   } else {
     recordedChunks = [];
     isRecording = true;
-    btn.textContent = '⏹️ Stop Recording (Recording...)';
-    btn.style.backgroundColor = '#666666';
+    
+    const tiktokSilentMode = document.getElementById('param-tiktok-silent')?.checked ?? false;
+    const tiktokDurationVal = document.getElementById('param-tiktok-duration')?.value ?? 'full';
+    
+    if (tiktokSilentMode) {
+      btn.textContent = '⏹️ Stop (⚠️ MUTED — add the music in the TikTok app!)';
+      btn.style.backgroundColor = '#d9534f';
+    } else {
+      btn.textContent = '⏹️ Stop Recording (Recording...)';
+      btn.style.backgroundColor = '#666666';
+    }
+
+    // Arm the auto-stop timer if a fixed duration (30s / 45s / 60s) was chosen
+    if (tiktokDurationVal !== 'full') {
+      const maxSec = parseInt(tiktokDurationVal, 10);
+      if (!isNaN(maxSec) && maxSec > 0) {
+        tiktokAutoStopTimer = setTimeout(() => {
+          if (isRecording) {
+            console.log(`⏱️ TikTok Max Duration (${maxSec}s) reached. Stopping recording.`);
+            toggleRecording();
+          }
+        }, maxSec * 1000);
+      }
+    }
     
     try {
-      if (!mediaStreamDest) mediaStreamDest = audioCtx.createMediaStreamDestination();
-
-      try { analyser.disconnect(); } catch(e){}
-      analyser.connect(mediaStreamDest);
+      if (!tiktokSilentMode) {
+        if (!mediaStreamDest) mediaStreamDest = audioCtx.createMediaStreamDestination();
+        try { analyser.disconnect(); } catch(e){}
+        analyser.connect(mediaStreamDest);
+        analyser.connect(audioCtx.destination);
+      }
 
       const canvasStream = typeof renderer.domElement.captureStream === 'function'
           ? renderer.domElement.captureStream(60)
           : null;
       if (!canvasStream) throw new Error("captureStream not supported");
+      
+      const audioTracks = (!tiktokSilentMode && mediaStreamDest) ? mediaStreamDest.stream.getAudioTracks() : [];
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
-        ...mediaStreamDest.stream.getAudioTracks()
+        ...audioTracks
       ]);
 
       let options = { videoBitsPerSecond: 35000000 }; // 35 Mbps for high quality motion
@@ -4484,6 +5846,9 @@ function toggleRecording() {
 
       const isMkv = options.mimeType && options.mimeType.includes('matroska');
       const ext = isMkv ? 'mkv' : 'webm';
+      const exportFilename = tiktokSilentMode 
+        ? `lasershow_TIKTOK_STUMM_${Date.now()}.${ext}`
+        : `lasershow_export.${ext}`;
 
       mediaRecorder = new MediaRecorder(combinedStream, options);
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
@@ -4493,10 +5858,20 @@ function toggleRecording() {
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        a.download = `lasershow_export.${ext}`;
+        a.download = exportFilename;
         document.body.appendChild(a);
         a.click();
         setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+
+        // TikTok Shortcut: Auto Copy Caption & Show Success Modal
+        if (tiktokSilentMode || document.getElementById('param-tiktok')?.checked) {
+          const defaultCaption = "Self-coded 3D Lasershow 🔴⚡ #lasershow #vj #rave #techno #hardstyle #threejs";
+          try {
+            navigator.clipboard.writeText(defaultCaption);
+            console.log("📋 TikTok caption copied to clipboard");
+          } catch(e){}
+          showTikTokSuccessModal(exportFilename, tiktokSilentMode);
+        }
       };
 
       mediaRecorder.start();
@@ -4512,9 +5887,9 @@ function toggleRecording() {
       }
     }
     
-    if (tiktokModeEnabled && songMap && songMap.sections.length > 0) {
-      // Welcher Startmodus ist gewählt?
-      const startModeRadio = document.querySelector('input[name="tiktok-start"]:checked');
+    if (songMap && songMap.sections.length > 0) {
+      // Which start mode is selected?
+      const startModeRadio = document.querySelector('input[name="recording-start"]:checked') || document.querySelector('input[name="tiktok-start"]:checked');
       const startMode = startModeRadio ? startModeRadio.value : 'drop';
 
       if (startMode === 'drop') {
@@ -4544,6 +5919,67 @@ function toggleRecording() {
       if (!playing) togglePlay(); 
     }
   }
+}
+
+function showTikTokSuccessModal(filename, isSilent) {
+  const existing = document.getElementById('tiktok-success-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'tiktok-success-modal';
+  modal.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 999999;
+    background: rgba(20, 20, 30, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid #ff007f;
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 10px 30px rgba(255, 0, 127, 0.3);
+    color: #fff;
+    font-family: system-ui, sans-serif;
+    max-width: 380px;
+  `;
+
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+      <span style="font-weight:700; color:#ffb3d9; font-size:1rem;">🎬 TikTok export ready</span>
+      <button onclick="document.getElementById('tiktok-success-modal').remove()" style="background:none; border:none; color:#aaa; font-size:1.2rem; cursor:pointer;">✕</button>
+    </div>
+    <p style="margin:0 0 0.6rem 0; font-size:0.85rem; color:#ccc;">
+      Saved <b>${filename}</b> and copied the caption.
+    </p>
+    <div style="background:rgba(255,0,127,0.12); border-left:3px solid #ff007f; padding:8px; border-radius:4px; font-size:0.8rem; margin-bottom:0.8rem; line-height:1.4;">
+      <b>How to keep the sound in sync on TikTok:</b><br>
+      1️⃣ Open the TikTok uploader and pick this video.<br>
+      2️⃣ Add the same track from TikTok's library.<br>
+      3️⃣ <b>Volume:</b> set the TikTok sound to <b>0%</b> and the original audio to <b>100%</b>.
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button id="btn-tiktok-copy-modal" style="flex:1; background:linear-gradient(45deg, #ff007f, #b300b3); color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:0.8rem; font-weight:600; cursor:pointer;">📋 Caption copied</button>
+      <button onclick="window.open('https://www.tiktok.com/creator-center/upload', '_blank')" style="background:#333; color:#fff; border:1px solid #666; padding:8px 10px; border-radius:6px; font-size:0.8rem; cursor:pointer;">🚀 TikTok Upload</button>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const copyBtn = modal.querySelector('#btn-tiktok-copy-modal');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const defaultCaption = "Self-coded 3D Lasershow 🔴⚡ #lasershow #vj #rave #techno #hardstyle #threejs";
+      navigator.clipboard.writeText(defaultCaption);
+      copyBtn.textContent = '✅ Copied';
+      setTimeout(() => copyBtn.textContent = '📋 Copy caption', 2000);
+    });
+  }
+
+  setTimeout(() => {
+    if (document.getElementById('tiktok-success-modal')) {
+      document.getElementById('tiktok-success-modal').remove();
+    }
+  }, 20000);
 }
 
 function avgRange(arr, lo, hi) {
@@ -4662,10 +6098,13 @@ document.getElementById('param-autocam').addEventListener('change', e => {
   autoCamEnabled = e.target.checked;
   if (autoCamEnabled) {
       droneEnabled = false;
+      crowdPOVEnabled = false;
       const elDrone = document.getElementById('param-dronecam');
       if (elDrone) elDrone.checked = false;
+      const elPOV = document.getElementById('param-crowdpov');
+      if (elPOV) elPOV.checked = false;
   }
-  if (!autoCamEnabled && !tvModeEnabled && !droneEnabled && currentMode === 'live') {
+  if (!autoCamEnabled && !tvModeEnabled && !droneEnabled && !crowdPOVEnabled && currentMode === 'live') {
     controls.enabled = true;
     camera.position.copy(baseCamPos);
     controls.target.copy(baseCamTarget);
@@ -4679,9 +6118,12 @@ document.getElementById('param-tvmode').addEventListener('change', e => {
       currentTvCamIdx = 0;
       justCut = true;
       droneEnabled = false;
+      crowdPOVEnabled = false;
       const elDrone = document.getElementById('param-dronecam');
       if (elDrone) elDrone.checked = false;
-  } else if (!autoCamEnabled && !droneEnabled && currentMode === 'live') {
+      const elPOV = document.getElementById('param-crowdpov');
+      if (elPOV) elPOV.checked = false;
+  } else if (!autoCamEnabled && !droneEnabled && !crowdPOVEnabled && currentMode === 'live') {
       controls.enabled = true;
       camera.position.copy(baseCamPos);
       controls.target.copy(baseCamTarget);
@@ -4694,10 +6136,13 @@ document.getElementById('param-dronecam').addEventListener('change', e => {
   if (droneEnabled) {
       autoCamEnabled = false;
       tvModeEnabled = false;
+      crowdPOVEnabled = false;
       const elAuto = document.getElementById('param-autocam');
       if (elAuto) elAuto.checked = false;
       const elTv = document.getElementById('param-tvmode');
       if (elTv) elTv.checked = false;
+      const elPOV = document.getElementById('param-crowdpov');
+      if (elPOV) elPOV.checked = false;
       
       controls.enabled = false;
       
@@ -4713,7 +6158,7 @@ document.getElementById('param-dronecam').addEventListener('change', e => {
       droneYawVel = 0;
       dronePitchVel = 0;
   } else {
-      if (!autoCamEnabled && !tvModeEnabled && currentMode === 'live') {
+      if (!autoCamEnabled && !tvModeEnabled && !crowdPOVEnabled && currentMode === 'live') {
           controls.enabled = true;
           camera.position.copy(baseCamPos);
           controls.target.copy(baseCamTarget);
@@ -4721,6 +6166,40 @@ document.getElementById('param-dronecam').addEventListener('change', e => {
       }
   }
 });
+
+const elCrowdPOV = document.getElementById('param-crowdpov');
+if (elCrowdPOV) {
+  elCrowdPOV.addEventListener('change', e => {
+    crowdPOVEnabled = e.target.checked;
+    if (crowdPOVEnabled) {
+      autoCamEnabled = false;
+      tvModeEnabled = false;
+      droneEnabled = false;
+      const elAuto = document.getElementById('param-autocam');
+      if (elAuto) elAuto.checked = false;
+      const elTv = document.getElementById('param-tvmode');
+      if (elTv) elTv.checked = false;
+      const elDrone = document.getElementById('param-dronecam');
+      if (elDrone) elDrone.checked = false;
+
+      controls.enabled = false;
+      if (crowdObjects.length > 0) {
+        povCurrentCrowdIdx = Math.floor(Math.random() * crowdObjects.length);
+        povTargetCrowdIdx = povCurrentCrowdIdx;
+        povHopElapsed = 0.6;
+        povHopActive = false;
+        povBeatCount = 0;
+      }
+    } else {
+      if (!autoCamEnabled && !tvModeEnabled && !droneEnabled && currentMode === 'live') {
+        controls.enabled = true;
+        camera.position.copy(baseCamPos);
+        controls.target.copy(baseCamTarget);
+        camera.lookAt(baseCamTarget);
+      }
+    }
+  });
+}
 
 // Drone Keyboard Control listeners
 window.addEventListener('keydown', e => {
@@ -4799,7 +6278,7 @@ document.getElementById('btn-apply-lyrics')?.addEventListener('click', () => {
             alert("Es ist aktuell kein Song geladen!");
         }
     } catch (err) {
-        alert("Fehler beim Speichern der Lyrics. Bitte auf gültiges JSON-Format achten.");
+        alert("Could not save the lyrics. Please check that the input is valid JSON.");
         console.error(err);
     }
 });
@@ -4894,6 +6373,7 @@ document.getElementById('param-fx-vhs').addEventListener('change', e => {
   filmPass.enabled = fxVhsEnabled;
   rgbShiftPass.enabled = fxVhsEnabled;
   rebuildPostChain();
+    syncScreenFxStyles();
 });
 
 
@@ -4912,19 +6392,38 @@ document.getElementById('param-fx-blur').addEventListener('change', e => {
   fxBlurEnabled = e.target.checked;
   afterimagePass.enabled = fxBlurEnabled;
   rebuildPostChain();
+    syncScreenFxStyles();
 });
 const paramTiktok = document.getElementById('param-tiktok');
-const tiktokStartModePanel = document.getElementById('tiktok-startmode');
 if (paramTiktok) {
   paramTiktok.addEventListener('change', e => {
     tiktokModeEnabled = e.target.checked;
-    // Start-Mode Panel einblenden/ausblenden
-    if (tiktokStartModePanel) {
-      tiktokStartModePanel.style.display = tiktokModeEnabled ? 'block' : 'none';
-    }
     window.dispatchEvent(new Event('resize')); 
   });
 }
+const paramWeatherRain = document.getElementById('param-weather-rain');
+if (paramWeatherRain) {
+    paramWeatherRain.addEventListener('change', e => {
+        setRainState(e.target.checked, rainIntensity);
+    });
+}
+
+const paramRainIntensity = document.getElementById('param-rain-intensity');
+if (paramRainIntensity) {
+    paramRainIntensity.addEventListener('input', e => {
+        const val = +e.target.value;
+        rainIntensity = val;
+        const valEl = document.getElementById('val-rain-intensity');
+        if (valEl) valEl.textContent = val;
+        if (rainEnabled) {
+            initRainParticleSystem(val);
+            if (audioCtx) {
+                rainAudioSynth.setIntensity(val, true);
+            }
+        }
+    });
+}
+
 document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
 
 document.addEventListener('keydown', (e) => {
@@ -5077,7 +6576,7 @@ function switchMode(mode) {
   if (mode === 'live') {
     tabLive.classList.add('active'); tabStudio.classList.remove('active');
     panelLive.classList.remove('hidden'); panelStudio.classList.add('hidden');
-    transformControl.detach(); // Hide controls
+    if (selectedLaser) selectedLaser = null;
     
     if (sidebar) sidebar.classList.add('hidden');
     if (svg) svg.classList.add('hidden');
@@ -5111,51 +6610,265 @@ tabStudio.addEventListener('click', () => switchMode('studio'));
 // Studio Mode Raycasting & Controls
 renderer.domElement.addEventListener('click', (event) => {
   if (currentMode !== 'studio') return;
-  // Ignore clicks if we are using the transform control
-  if (transformControl.dragging) return;
 
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
   raycaster.setFromCamera(mouse, camera);
+
+  if (isTargetingMode) {
+      // Raycast against the floor (y=0 plane) or other objects to find a target point
+      // For simplicity, we create a mathematical plane at y=0
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const targetPoint = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, targetPoint);
+      if (targetPoint && selectedLasers.length > 0) {
+          aimAtTarget(selectedLasers, targetPoint);
+          if (typeof updateInspectorUI === 'function') updateInspectorUI();
+      }
+      return; // Do not select/deselect when in targeting mode
+  }
+
   const intersects = raycaster.intersectObjects(scene.children, true);
   
+  let clickedLaser = null;
   for (let i = 0; i < intersects.length; i++) {
     const ob = intersects[i].object;
     if (ob.userData.isProjectorHitbox) {
       if (ob.userData.isMovingHead) {
-          const targetHead = movingHeadObjects.find(mh => mh.proxy === ob.parent);
-          if (targetHead) {
-            selectedLaser = targetHead;
-            transformControl.attach(targetHead.proxy);
-            document.getElementById('lbl-selected-laser').textContent = `Moving Head`;
-            found = true;
-            break;
-          }
+          clickedLaser = movingHeadObjects.find(mh => mh.proxy === ob.parent);
       } else {
-          const targetLaser = laserObjects.find(l => l.proxy === ob.parent);
-          if (targetLaser) {
-            selectedLaser = targetLaser;
-            transformControl.attach(targetLaser.proxy);
-            document.getElementById('lbl-selected-laser').textContent = `Laser #${targetLaser.id}`;
-            found = true;
-            break;
-          }
+          clickedLaser = laserObjects.find(l => l.proxy === ob.parent);
       }
+      if (clickedLaser) break;
     }
   }
-  if (!found) {
-    transformControl.detach();
-    selectedLaser = null;
-    document.getElementById('lbl-selected-laser').textContent = 'None';
+
+  const isShiftDown = event.shiftKey;
+
+  if (clickedLaser) {
+      if (isShiftDown) {
+          const index = selectedLasers.indexOf(clickedLaser);
+          if (index > -1) {
+              selectedLasers.splice(index, 1);
+              if (boxHelpers.has(clickedLaser)) {
+                  scene.remove(boxHelpers.get(clickedLaser));
+                  boxHelpers.delete(clickedLaser);
+              }
+          } else {
+              selectedLasers.push(clickedLaser);
+              const helper = new THREE.BoxHelper(clickedLaser.proxy, 0x00ffcc);
+              scene.add(helper);
+              boxHelpers.set(clickedLaser, helper);
+          }
+      } else {
+          // Clear existing
+          selectedLasers.forEach(l => {
+              if (boxHelpers.has(l)) {
+                  scene.remove(boxHelpers.get(l));
+                  boxHelpers.delete(l);
+              }
+          });
+          selectedLasers = [clickedLaser];
+          const helper = new THREE.BoxHelper(clickedLaser.proxy, 0x00ffcc);
+          scene.add(helper);
+          boxHelpers.set(clickedLaser, helper);
+      }
+  } else if (!isShiftDown) {
+      // Clicked on nothing without shift, clear selection
+      selectedLasers.forEach(l => {
+          if (boxHelpers.has(l)) {
+              scene.remove(boxHelpers.get(l));
+              boxHelpers.delete(l);
+          }
+      });
+      selectedLasers = [];
   }
+
+  updateSelectionUI();
 });
 
-// Transform Mode Radio Buttons
-document.querySelectorAll('input[name="tm"]').forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    transformControl.setMode(e.target.value); // 'translate' or 'rotate'
-  });
+export function updateSelectionUI() {
+  if (selectedLasers.length === 1) {
+      selectedLaser = selectedLasers[0];
+      document.getElementById('lbl-selected-laser').textContent = `Laser #${selectedLaser.id !== undefined ? selectedLaser.id : 'MH'}`;
+  } else {
+      selectedLaser = null;
+      if (selectedLasers.length > 1) {
+          document.getElementById('lbl-selected-laser').textContent = `${selectedLasers.length} Lasers selected`;
+      } else {
+          document.getElementById('lbl-selected-laser').textContent = 'None';
+      }
+  }
+  if (typeof updateInspectorUI === 'function') updateInspectorUI();
+}
+
+export function selectAllLasers() {
+    selectedLasers.forEach(l => {
+        if (boxHelpers.has(l)) {
+            scene.remove(boxHelpers.get(l));
+            boxHelpers.delete(l);
+        }
+    });
+    selectedLasers = [...laserObjects];
+    selectedLasers.forEach(l => {
+        const helper = new THREE.BoxHelper(l.proxy, 0x00ffcc);
+        scene.add(helper);
+        boxHelpers.set(l, helper);
+    });
+    updateSelectionUI();
+}
+
+export function deselectAllLasers() {
+    selectedLasers.forEach(l => {
+        if (boxHelpers.has(l)) {
+            scene.remove(boxHelpers.get(l));
+            boxHelpers.delete(l);
+        }
+    });
+    selectedLasers.length = 0; // Clear array while keeping reference
+    updateSelectionUI();
+}
+
+export function selectOddLasers() {
+    deselectAllLasers();
+    laserObjects.forEach((l, i) => {
+        if (i % 2 !== 0) {
+            selectedLasers.push(l);
+            const helper = new THREE.BoxHelper(l.proxy, 0x00ffcc);
+            scene.add(helper);
+            boxHelpers.set(l, helper);
+        }
+    });
+    updateSelectionUI();
+}
+
+export function selectEvenLasers() {
+    deselectAllLasers();
+    laserObjects.forEach((l, i) => {
+        if (i % 2 === 0) {
+            selectedLasers.push(l);
+            const helper = new THREE.BoxHelper(l.proxy, 0x00ffcc);
+            scene.add(helper);
+            boxHelpers.set(l, helper);
+        }
+    });
+    updateSelectionUI();
+}
+
+// Inspector UI Logic
+window.updateInspectorUI = function() {
+    const inspectorPanel = document.getElementById('inspector-panel');
+    if (selectedLasers.length === 0) {
+        inspectorPanel.style.display = 'none';
+        return;
+    }
+    
+    const hasLaser = selectedLasers.some(l => l.isManualOverride !== undefined);
+    if (!hasLaser) {
+        inspectorPanel.style.display = 'none';
+        return;
+    }
+    
+    inspectorPanel.style.display = 'block';
+    
+    const primaryLaser = selectedLasers.find(l => l.isManualOverride !== undefined);
+    if (!primaryLaser) return;
+
+    document.getElementById('insp-override').checked = primaryLaser.isManualOverride;
+    document.getElementById('insp-pan').value = primaryLaser.manualPan || 0;
+    document.getElementById('val-insp-pan').textContent = `${primaryLaser.manualPan || 0}°`;
+    document.getElementById('insp-tilt').value = primaryLaser.manualTilt || 0;
+    document.getElementById('val-insp-tilt').textContent = `${primaryLaser.manualTilt || 0}°`;
+    document.getElementById('insp-color').value = '#' + primaryLaser.manualColor.getHexString();
+    document.getElementById('insp-intensity').value = primaryLaser.manualIntensity || 1.0;
+    document.getElementById('val-insp-intensity').textContent = (primaryLaser.manualIntensity || 1.0).toFixed(1);
+    document.getElementById('insp-spread').value = primaryLaser.manualSpread || 1.0;
+    document.getElementById('val-insp-spread').textContent = (primaryLaser.manualSpread || 1.0).toFixed(1);
+    document.getElementById('insp-pattern').value = primaryLaser.manualPattern || 'auto';
+};
+
+// Bind Inspector Events
+document.getElementById('insp-override').addEventListener('change', (e) => {
+    const val = e.target.checked;
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.isManualOverride = val; });
+});
+document.getElementById('insp-pan').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('val-insp-pan').textContent = `${val}°`;
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.manualPan = val; });
+});
+document.getElementById('insp-tilt').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('val-insp-tilt').textContent = `${val}°`;
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.manualTilt = val; });
+});
+document.getElementById('insp-color').addEventListener('input', (e) => {
+    const hex = e.target.value;
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.manualColor.set(hex); });
+});
+document.getElementById('insp-intensity').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('val-insp-intensity').textContent = val.toFixed(1);
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.manualIntensity = val; });
+});
+document.getElementById('insp-spread').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('val-insp-spread').textContent = val.toFixed(1);
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.manualSpread = val; });
+});
+document.getElementById('insp-pattern').addEventListener('change', (e) => {
+    const val = e.target.value;
+    selectedLasers.forEach(l => { if (l.isManualOverride !== undefined) l.manualPattern = val; });
+});
+
+// Scene Export / Import
+document.getElementById('btn-save-scene').addEventListener('click', () => {
+    const data = laserObjects.filter(l => l.isManualOverride).map(l => ({
+        id: l.id,
+        manualPan: l.manualPan,
+        manualTilt: l.manualTilt,
+        manualIntensity: l.manualIntensity,
+        manualSpread: l.manualSpread,
+        manualColor: '#' + l.manualColor.getHexString(),
+        manualPattern: l.manualPattern
+    }));
+    const blob = new Blob([JSON.stringify({ lasers: data }, null, 2)], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'laser_scene.json';
+    a.click();
+});
+
+document.getElementById('btn-load-scene').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const parsed = JSON.parse(e.target.result);
+            if (parsed.lasers) {
+                laserObjects.forEach(l => l.isManualOverride = false);
+                parsed.lasers.forEach(data => {
+                    const l = laserObjects.find(lo => lo.id === data.id);
+                    if (l) {
+                        l.isManualOverride = true;
+                        l.manualPan = data.manualPan || 0;
+                        l.manualTilt = data.manualTilt || 0;
+                        l.manualIntensity = data.manualIntensity !== undefined ? data.manualIntensity : 1.0;
+                        l.manualSpread = data.manualSpread || 1.0;
+                        if (data.manualColor) l.manualColor.set(data.manualColor);
+                        l.manualPattern = data.manualPattern || 'auto';
+                    }
+                });
+                if (typeof updateInspectorUI === 'function') updateInspectorUI();
+            }
+        } catch (err) {
+            console.error('Failed to load scene', err);
+            alert('Failed to load scene file.');
+        }
+    };
+    reader.readAsText(file);
 });
 
 // Add / Remove Lasers
@@ -5170,12 +6883,10 @@ document.getElementById('btn-remove-laser').addEventListener('click', () => {
     if (selectedLaser) {
         if (selectedLaser.isMovingHead) {
             scene.remove(selectedLaser.group);
-            transformControl.detach();
             const index = movingHeadObjects.indexOf(selectedLaser);
             if (index > -1) movingHeadObjects.splice(index, 1);
         } else {
             scene.remove(selectedLaser.pivot);
-            transformControl.detach();
             const index = laserObjects.indexOf(selectedLaser);
             if (index > -1) laserObjects.splice(index, 1);
         }
@@ -5212,6 +6923,8 @@ function detectTransient(high) {
   avg /= BEAT_HISTORY;
   return high > Math.max(avg * 1.7, 0.18);
 }
+
+updateUIWorkflowLoop();
 
 // ─────────────────────────────────────────────
 //  SONG TIMELINE RENDERER
@@ -5361,6 +7074,30 @@ let frameCount = 0;
 let dynamicBeatPhase = 0;
 let lastRawBeatPhase = 0;
 
+// ── Frame timing ──────────────────────────────────────────────
+// The render loop is driven by renderer.setAnimationLoop(), which fires at the
+// display's refresh rate (60 / 120 / 144 Hz …). Every animation below therefore
+// has to be scaled by the real elapsed time, otherwise the whole show runs
+// 2.4x too fast on a 144 Hz monitor and drifts away from the music.
+const FIXED_STEP = 1 / 60;     // the rate the original constants were tuned for
+const MAX_STEP   = 1 / 15;     // clamp after tab-switch / GC stall (no huge jumps)
+let lastFrameTs  = 0;          // performance.now() of the previous frame
+let frameDelta   = FIXED_STEP; // seconds since the previous frame
+let deltaScale   = 1;          // frameDelta / FIXED_STEP — multiplier for per-frame constants
+let smoothedFPS  = 60;
+
+/**
+ * Frame-rate independent lerp factor.
+ * `k` is the smoothing factor that was tuned at 60 fps; this converts it into
+ * the equivalent factor for the current frame duration so decays (flash,
+ * strobe, camera easing) fade over the same wall-clock time at any refresh rate.
+ */
+function fLerp(k, dt = frameDelta) {
+    if (k <= 0) return 0;
+    if (k >= 1) return 1;
+    return 1 - Math.pow(1 - k, dt / FIXED_STEP);
+}
+
 function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPeakDrop, isSilent, buildUp, section) {
     if (!mhBaseIM) return;
     const count = movingHeadObjects.length;
@@ -5412,10 +7149,13 @@ function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPea
         else hs.adsrState = Math.max(energy * 0.18, hs.adsrState * 0.87);
 
         // ── Opacity ───────────────────────────────────────────────────
-        let mhOp = isSilent
-            ? 0.0
-            : Math.min(1.0, vocals * 1.1 + drums * 0.45 + beatState.flashDecay * 0.45 + hs.adsrState * 0.6) * activeMhIntensity;
-        if (currentMode === 'studio') mhOp = Math.max(mhOp, 0.45);
+        let mhOp = 0;
+        if (!playing || isSilent) {
+            mhOp = 0.60 * activeMhIntensity;
+        } else {
+            mhOp = Math.min(1.0, vocals * 1.1 + drums * 0.45 + beatState.flashDecay * 0.45 + hs.adsrState * 0.6) * activeMhIntensity;
+        }
+        if (currentMode === 'studio') mhOp = Math.max(mhOp, 0.60);
 
         // ── Matrices (always absolute — no accumulation drift) ─────────
         // 1. Base housing (sits on truss)
@@ -5460,14 +7200,7 @@ function updateInstancedMovingHeads(t, tAnim, energy, vocals, drums, kick, isPea
         colorDirty = true;
 
         if (mhOp > 0.05) {
-            const dir = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(hs.tilt, hs.pan, 0, 'YXZ'));
-            const sourcePos = new THREE.Vector3(mh.pos.x, mh.pos.y - 0.55, mh.pos.z);
-            activeBeams.push({
-                pos: sourcePos,
-                dir: dir,
-                color: _col1.clone(),
-                isLaser: false
-            });
+            pushBeam(mh.pos.x, mh.pos.y - 0.55, mh.pos.z, hs.tilt, hs.pan, _col1, false);
         }
     }
 
@@ -5968,13 +7701,7 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
         colorDirty = true;
 
         if (op > 0.05) {
-            const dir = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(l.rot.x, l.rot.y, 0, 'YXZ'));
-            activeBeams.push({
-                pos: l.pos,
-                dir: dir,
-                color: _col1.clone(),
-                isLaser: true
-            });
+            pushBeam(l.pos.x, l.pos.y, l.pos.z, l.rot.x, l.rot.y, _col1, true);
         }
     }
 
@@ -5990,6 +7717,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
 let recentFPS = [];
 let currentLODLevel = 0; // 0 = High, 1 = Medium, 2 = Low
 let lodCheckTimer = 0;
+let lodShadowDwell = 0;              // seconds since the last shadow on/off switch
+const LOD_SHADOW_DWELL_S = 6;        // minimum settle time before switching again
 
 function updateDynamicLOD(dt) {
     if (!dt || dt === 0) return;
@@ -5997,6 +7726,7 @@ function updateDynamicLOD(dt) {
     recentFPS.push(fps);
     if (recentFPS.length > 60) recentFPS.shift(); // 60 frames average
 
+    lodShadowDwell += dt;
     lodCheckTimer += dt;
     if (lodCheckTimer > 1.0) { // Check every 1 second
         let avgFPS = recentFPS.reduce((a, b) => a + b, 0) / recentFPS.length;
@@ -6008,8 +7738,20 @@ function updateDynamicLOD(dt) {
             newLOD = Math.max(0, currentLODLevel - 1); // Upgrade
         }
         
+        // Turning shadows on or off invalidates every material's shader program,
+        // so a level change that crosses that boundary has to settle before the
+        // next one is allowed. Without this the renderer thrashes recompiles
+        // right around the 35/55 fps thresholds.
+        const crossesShadowBoundary =
+            (SHADOW_MAP_SIZES[newLOD] > 0) !== (SHADOW_MAP_SIZES[currentLODLevel] > 0);
+        if (crossesShadowBoundary && lodShadowDwell < LOD_SHADOW_DWELL_S) {
+            newLOD = currentLODLevel;
+        }
+
         if (newLOD !== currentLODLevel) {
             currentLODLevel = newLOD;
+            if (crossesShadowBoundary) lodShadowDwell = 0;
+            setShadowQuality(currentLODLevel);
             // console.log('Dynamic LOD Level changed to:', currentLODLevel, 'Avg FPS:', avgFPS.toFixed(1));
             
             // Adjust bloom and flares globally
@@ -6033,11 +7775,81 @@ function updateDynamicLOD(dt) {
     }
 }
 
+// ── Frame error containment ──────────────────────────────────────────────────
+// setAnimationLoop does not catch exceptions: a single throw anywhere in the
+// frame stops the loop for good and leaves the canvas black with no explanation.
+// That has already happened once during development, so the frame body is now
+// wrapped. Errors are reported, the loop survives, and the scene still renders
+// through a minimal path so the user sees the show instead of a black rectangle.
+let frameErrorCount = 0;
+let frameErrorShown = false;
+
+function reportFrameError(e) {
+    frameErrorCount++;
+    if (frameErrorCount <= 3) {
+        console.error(`Render loop error (frame ${frameCount}):`, e);
+    } else if (frameErrorCount === 4) {
+        console.error('Further render loop errors suppressed.');
+    }
+    if (!frameErrorShown && typeof document !== 'undefined') {
+        frameErrorShown = true;
+        const bar = document.createElement('div');
+        bar.id = 'render-error-bar';
+        bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;' +
+            'background:#7a1020;color:#fff;font:12px/1.5 system-ui,sans-serif;padding:8px 12px;';
+        bar.textContent = 'Rendering error: ' + (e && e.message ? e.message : String(e)) +
+            ' — the view keeps running in a reduced mode. See the browser console (F12) for details.';
+        document.body.appendChild(bar);
+    }
+}
+
 function animate() {
+    try {
+        animateFrame();
+    } catch (e) {
+        reportFrameError(e);
+        // Keep something on screen even if the full frame path is broken.
+        try {
+            const cam = isStageBuilderMode ? builderCamera : camera;
+            renderer.render(scene, cam);
+        } catch (_) { /* renderer itself is gone; nothing more we can do */ }
+    }
+}
+
+function animateFrame() {
   // Using setAnimationLoop below instead of requestAnimationFrame
+  if (photoModeManager.isActive) {
+      lastFrameTs = 0; // resume cleanly instead of jumping by the whole pause
+      return;
+  }
+
+  // ── Real frame delta ────────────────────────────────────────
+  // Offline (video export) rendering advances by a deterministic fixed step so
+  // the exported file is identical regardless of how fast the encoder runs.
+  if (isOfflineRendering) {
+      frameDelta = FIXED_STEP;
+      lastFrameTs = 0;
+  } else {
+      const nowTs = performance.now();
+      if (lastFrameTs === 0) {
+          frameDelta = FIXED_STEP;
+      } else {
+          frameDelta = Math.min((nowTs - lastFrameTs) / 1000, MAX_STEP);
+      }
+      lastFrameTs = nowTs;
+  }
+  deltaScale = frameDelta / FIXED_STEP;
+  smoothedFPS += ((1 / Math.max(frameDelta, 1e-4)) - smoothedFPS) * 0.05;
 
   frameCount++;
-  activeBeams.length = 0;
+  resetBeamPool();
+
+  // renderer.info resets itself at the start of every render() call. The composer
+  // issues several per frame, so the automatic counter only ever reports the last
+  // fullscreen pass. Reset once per frame instead and the numbers become the real
+  // per-frame totals (including the shadow-map passes).
+  if (renderer.info && renderer.info.autoReset) renderer.info.autoReset = false;
+  if (renderer.info && renderer.info.reset) renderer.info.reset();
 
   // Lazy Loading Stage Builder Staggered Execution
   if (stageBuildQueue.length > 0) {
@@ -6045,6 +7857,19 @@ function animate() {
       for (let i = 0; i < itemsToBuild; i++) {
           const action = stageBuildQueue.shift();
           if (action) action();
+      }
+      shadowFlagsDirty = true;
+  } else if (shadowFlagsDirty) {
+      // The stage is built in chunks across several frames, so the cast/receive
+      // flags are applied once the queue has actually drained.
+      shadowFlagsDirty = false;
+      // This walks scene objects built by several different code paths. A throw
+      // here would happen inside the render loop and blank the screen, so it is
+      // contained — shadow flags are cosmetic, the show must keep running.
+      try {
+          applyShadowFlags();
+      } catch (e) {
+          console.warn('applyShadowFlags failed; continuing without updated shadow flags:', e);
       }
   }
 
@@ -6066,7 +7891,6 @@ function animate() {
           });
       }
       if (stageGroup) {
-          const _stageWorldPos = new THREE.Vector3();
           stageGroup.children.forEach(child => {
               child.getWorldPosition(_stageWorldPos);
               const dist = _stageWorldPos.distanceTo(camera.position);
@@ -6078,10 +7902,10 @@ function animate() {
   controls.update();
 
   // Basic t increment always moving for UI/Background noise
-  t += 0.01; 
+  t += 0.6 * frameDelta;
 
   // Shared audio values accessible by pyro update (filled in Live mode check)
-  let _pyroEnergy = 0.1, _pyroBass = 0.1, _pyroKick = 0, _pyroIsPeak = false;
+  let _pyroEnergy = 0.1, _pyroBass = 0.1, _pyroMid = 0.1, _pyroHigh = 0.1, _pyroKick = 0, _pyroIsPeak = false;
 
   if (analyser && playing && currentMode === 'live') {
     analyser.getByteFrequencyData(dataArray); drawViz();
@@ -6091,7 +7915,7 @@ function animate() {
 
   // ── Move Pyrotechnik Update to a Safe Global Spot in animate() ──
   if (pyroEnabled && !isOfflineRendering) {
-      const dt = 1/60; // assume 60fps for physics
+      const dt = frameDelta; // real elapsed time
       pyroSystems.forEach(ps => {
           const isFlame = ps.type === 'flame';
           const isSpark = ps.type === 'spark';
@@ -6102,7 +7926,7 @@ function animate() {
           ps.points.visible = true;
           ps.update(
               dt, t,
-              _pyroEnergy, _pyroBass, _pyroKick,
+              _pyroEnergy, _pyroBass, _pyroMid, _pyroHigh, _pyroKick,
               CFG.windX || 0, CFG.windY || 0, CFG.pyroIntensity || 1.0,
               _pyroIsPeak
           );
@@ -6159,7 +7983,7 @@ function animate() {
           
           if (section.type === 'drop') {
               const secName = (section.id !== undefined) ? `section ${section.id}` : 'fallback section';
-              console.log(`🔥 [Deep-AI Show Generator] DROP DETECTED at ${secName}! Zünde Pyrotechnik, Sparks und CO2 Nebelwerfer!`);
+              console.log(`🔥 [Deep-AI Show Generator] DROP DETECTED at ${secName} — firing pyro, sparks and CO2 jets`);
               triggerFogJet(-28, 0.2, -22, 1.5, 0.4, 0.4);
               triggerFogJet(28, 0.2, -22, -1.5, 0.4, 0.4);
               triggerFogJet(-12, 0.2, -25, 0.5, 0.6, 0.4);
@@ -6182,14 +8006,14 @@ function animate() {
   const kick   = rtKick;
   const energy = frame ? frame.energy * 0.4  + rtEnergy * 0.6 : rtEnergy;
   
-  // Expose to pyro
-  _pyroBass = bass; _pyroKick = kick; _pyroEnergy = energy;
-  _pyroIsPeak = (playing && peakModeEnabled && (energy > 0.82 || rtSubBass > 0.75) && ((frame && frame.energy > 0.75) || rtEnergy > 0.75 || rtSubBass > 0.75))
-             || (playing && section && section.type === 'drop' && energy > 0.5);
-  
   // Aliases to prevent crash in legacy pattern logic
   const mid = vocals;
   const high = drums;
+  
+  // Expose to pyro
+  _pyroBass = bass; _pyroMid = mid; _pyroHigh = high; _pyroKick = kick; _pyroEnergy = energy;
+  _pyroIsPeak = (playing && peakModeEnabled && (energy > 0.82 || rtSubBass > 0.75) && ((frame && frame.energy > 0.75) || rtEnergy > 0.75 || rtSubBass > 0.75))
+             || (playing && section && section.type === 'drop' && energy > 0.5);
 
   // ── Build-up strength ─────────────────────────────────────────
   const buildUp = (frame && songMap && songMap.buildUpMap)
@@ -6405,13 +8229,17 @@ function animate() {
              justCut = true;
         }
       } else {
-        beatState.speedMult = THREE.MathUtils.lerp(beatState.speedMult, 1.0, 0.07);
+        beatState.speedMult = THREE.MathUtils.lerp(beatState.speedMult, 1.0, fLerp(0.07));
       }
-      beatState.flashDecay = THREE.MathUtils.lerp(beatState.flashDecay, 0, 0.14);
-      beatState.strobeTimer++;
+      beatState.flashDecay = THREE.MathUtils.lerp(beatState.flashDecay, 0, fLerp(0.14));
+      // Strobe toggles every `sRate` 60fps-frames — accumulate in those units so
+      // the flash frequency stays constant on 120/144 Hz displays.
       const sRate = Math.max(2, Math.round(8 - energy * 10));
+      const strobePrev = Math.floor(beatState.strobeTimer / sRate);
+      beatState.strobeTimer += deltaScale;
+      const strobeNow = Math.floor(beatState.strobeTimer / sRate);
       beatState.strobeOn = (secPat !== 'strobe') ? true
-        : (beatState.strobeTimer % sRate !== 0) ? beatState.strobeOn : !beatState.strobeOn;
+        : (strobeNow === strobePrev) ? beatState.strobeOn : !beatState.strobeOn;
     } else {
       beatState.speedMult = 1.0; beatState.flashDecay = 0; beatState.strobeOn = true;
     }
@@ -6419,7 +8247,7 @@ function animate() {
     // ── Free-running t (used as fallback + opacity) ───────────────
     // Basic increment already done at top, but we add music-reactive boost here if playing
     if (playing) {
-        t += 0.01 * CFG.speed * secSpeed * (1.0 + bass * 2.0) * beatState.speedMult;
+        t += 0.6 * frameDelta * CFG.speed * secSpeed * (1.0 + bass * 2.0) * beatState.speedMult;
     }
 
     // ── Kamera-Bewegung (Camera-Shake) ────────────────────────────
@@ -6439,7 +8267,7 @@ function animate() {
     if (droneEnabled && currentMode === 'live') {
         controls.enabled = false;
         
-        const frameDt = 1 / 60;
+        const frameDt = frameDelta;
         
         // Calculate forward & right vectors relative to yaw
         const forward = new THREE.Vector3(0, 0, -1);
@@ -6528,7 +8356,7 @@ function animate() {
         
         // Speed FOV stretch
         const speedK = droneVel.length();
-        camera.fov = THREE.MathUtils.lerp(camera.fov, 55 + speedK * 0.45, 0.1);
+        camera.fov = THREE.MathUtils.lerp(camera.fov, 55 + speedK * 0.45, fLerp(0.1));
         camera.updateProjectionMatrix();
         
     } else if ((autoCamEnabled || tvModeEnabled) && currentMode === 'live') {
@@ -6626,15 +8454,94 @@ function animate() {
             targetZ += (Math.random() - 0.5) * 4.0;
         }
 
-        camera.position.lerp(_targetPos.set(targetX, targetY, targetZ), lerpSpeed);
-        autoCamFocus.lerp(_lookTarget.set(lookX, lookY, lookZ), lerpSpeed * 1.5);
+        camera.position.lerp(_targetPos.set(targetX, targetY, targetZ), fLerp(lerpSpeed));
+        autoCamFocus.lerp(_lookTarget.set(lookX, lookY, lookZ), fLerp(Math.min(lerpSpeed * 1.5, 0.99)));
         if (isPeakDrop) {
             autoCamFocus.x += (Math.random() - 0.5) * 3.0;
             autoCamFocus.y += (Math.random() - 0.5) * 3.0;
         }
         camera.lookAt(autoCamFocus);
 
-    } else if (currentMode === 'live' && !transformControl.dragging && !droneEnabled) {
+    } else if (crowdPOVEnabled && currentMode === 'live') {
+        controls.enabled = false;
+
+        // Track beat triggers for 4-beat crowd hops
+        if (beatState.isBeat) {
+            povBeatCount++;
+            if (povBeatCount >= POV_CONFIG.hopTransition.beatInterval || isPeakDrop) {
+                povBeatCount = 0;
+                if (crowdObjects.length > 1) {
+                    povCurrentCrowdIdx = povTargetCrowdIdx;
+                    let nextIdx = Math.floor(Math.random() * crowdObjects.length);
+                    if (nextIdx === povCurrentCrowdIdx) {
+                        nextIdx = (nextIdx + 1) % crowdObjects.length;
+                    }
+                    povTargetCrowdIdx = nextIdx;
+                    povHopElapsed = 0.0;
+                    povHopActive = true;
+                }
+            }
+            // Smooth random yaw jitter target on beat
+            povTargetYawVarianceDeg = (Math.random() - 0.5) * 2 * POV_CONFIG.yawVarianceLimitDeg;
+        }
+
+        if (kick > POV_CONFIG.kickShake.thresholdBassEnergy) {
+            povKickElapsed = 0.0;
+        } else {
+            povKickElapsed += frameDt;
+        }
+
+        if (povHopActive) {
+            povHopElapsed += frameDt;
+            if (povHopElapsed >= POV_CONFIG.hopTransition.duration) {
+                povHopActive = false;
+                povCurrentCrowdIdx = povTargetCrowdIdx;
+            }
+        }
+
+        povYawVarianceDeg = THREE.MathUtils.lerp(povYawVarianceDeg, povTargetYawVarianceDeg, fLerp(0.08));
+
+        const currentMember = (crowdObjects[povCurrentCrowdIdx]?.mesh) ? {
+            x: crowdObjects[povCurrentCrowdIdx].mesh.position.x,
+            y: crowdObjects[povCurrentCrowdIdx].baseY || 0,
+            z: crowdObjects[povCurrentCrowdIdx].mesh.position.z
+        } : { x: 0, y: 0, z: 10 };
+
+        const targetMember = (crowdObjects[povTargetCrowdIdx]?.mesh) ? {
+            x: crowdObjects[povTargetCrowdIdx].mesh.position.x,
+            y: crowdObjects[povTargetCrowdIdx].baseY || 0,
+            z: crowdObjects[povTargetCrowdIdx].mesh.position.z
+        } : currentMember;
+
+        const isPortrait = (typeof tiktokModeEnabled !== 'undefined' && tiktokModeEnabled);
+        const povFrame = evaluateAudiencePOVCamera({
+            currentCrowdMember: currentMember,
+            targetCrowdMember: povHopActive ? targetMember : null,
+            hopElapsed: povHopElapsed,
+            timeSeconds: t,
+            bpm: (typeof songMap !== 'undefined' && songMap && songMap.bpm) ? songMap.bpm : 128,
+            beatEnergy: energy,
+            kickElapsed: povKickElapsed,
+            isPortraitMode: isPortrait,
+            landscapeVFOV: 55
+        });
+
+        camera.position.set(povFrame.position.x, povFrame.position.y, povFrame.position.z);
+        
+        // Look at DJ booth / stage center with yaw variance
+        const stageTarget = { x: 0, y: 2.0, z: 0 };
+        const yawRad = calculateLookAtYaw(camera.position, stageTarget, povYawVarianceDeg);
+        const lookDistance = 25.0;
+        const lookX = camera.position.x + Math.sin(yawRad) * lookDistance;
+        const lookZ = camera.position.z + Math.cos(yawRad) * lookDistance;
+        camera.lookAt(lookX, 2.0, lookZ);
+
+        if (camera.fov !== povFrame.fov) {
+            camera.fov = povFrame.fov;
+            camera.updateProjectionMatrix();
+        }
+
+    } else if (currentMode === 'live' && !droneEnabled && !crowdPOVEnabled) {
         controls.enabled = true;
         if (camera.fov !== 55) {
             camera.fov = 55;
@@ -6650,7 +8557,7 @@ function animate() {
     // ── Live Crowd Update (Boiler Room Silhouettes) ───────────────
     if (liveCrowdEnabled && crowdObjects.length > 0) {
         const isDrop = playing && energy > 0.85 && buildUp < 0.2;
-        const bouncePow = playing ? (0.5 + energy * 1.2) : 0;
+        const bouncePow = (playing && raybounceEnabled) ? (0.5 + energy * 1.2) : 0;
 
         crowdObjects.forEach((c, idx) => {
             if (c.lod === 2) return; // Completely hidden, skip calculations!
@@ -6730,7 +8637,7 @@ function animate() {
             }
             
             // Subtle rotation for volumetric illusion
-            ul.mesh.rotation.y += 0.01;
+            ul.mesh.rotation.y += 0.6 * frameDelta;
             
             // Strobe effect checking
             if (playing && secPat === 'strobe' && !beatState.strobeOn) {
@@ -6750,14 +8657,57 @@ function animate() {
         let shift = 0.0015 + (beatState.isBeat ? kick * 0.008 : 0) + (energy * 0.002);
         if (isPeakDrop) shift += Math.random() * 0.04; // Extreme visual glitch on drop
         rgbShiftAmount.value = shift;
-        filmTimeUniform.value += 0.05 * CFG.speed * (isPeakDrop ? 4.0 : 1.0);
+        filmTimeUniform.value += 3.0 * frameDelta * CFG.speed * (isPeakDrop ? 4.0 : 1.0);
+        if (glRgbShiftPass) glRgbShiftPass.uniforms.amount.value = shift;
     }
 
     if (fxBlurEnabled) {
-        // Blur FX dynamisch rein an Bass/Energie koppeln (unabhängig vom Peak-Mode Flag)
+        // Drive the blur FX from bass/energy directly, independent of the peak-mode flag
         let damp = 0.75 + (beatState.isBeat ? kick * 0.20 : 0) + (energy * 0.10);
         afterImageDamp.value = Math.min(0.98, damp);
+        if (glAfterimage) glAfterimage.uniforms.damp.value = Math.min(0.98, damp);
     }
+
+    // ── Music-reactive bloom ─────────────────────────────────────
+    // A laser show lives on its glow: pump it on the kick and open it right up
+    // on a drop, so beams bloom instead of sitting flat on the screen.
+    if (glBloomPass) {
+        const pump = glBloomStrength * (1.0 + energy * 0.30 + beatState.flashDecay * 0.35 + (isPeakDrop ? 0.25 : 0));
+        glBloomPass.strength += (pump - glBloomPass.strength) * fLerp(0.25);
+    }
+
+    if (newFixtures) {
+        newFixtures.update({
+            t,
+            energy,
+            bass,
+            kick,
+            isSilent,
+            isPeakDrop,
+            buildUp,
+            secPat,
+            beatState,
+            hasVideoColor,
+            videoBaseHue,
+            sectionLaserHues,
+            playing,
+            hueToHex
+        });
+    }
+
+    // ── 3D DJ Avatar Audio Kinematics Update (R6) ────────────────
+    if (djAvatarEnabled && djAvatarRig) {
+        updateDJAvatar(djAvatarRig, frameDelta, {
+            time: t,
+            bpm: (typeof songMap !== 'undefined' && songMap && songMap.bpm) ? songMap.bpm : 128,
+            beatEnergy: energy,
+            kickEnergy: kick,
+            bassEnergy: bass,
+            isDrop: isPeakDrop || (energy > 0.88 && bass > 0.80)
+        });
+    }
+
+    syncScreenFxStyles();
 
     // ──────────────────────────────────────────────────────────────
     //  MODE A: Procedural (Instanced)
@@ -6808,10 +8758,10 @@ function animate() {
         updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDrop, isSilent, section, melody, buildUp, true);
     } else if (currentMode === 'studio') {
         laserObjects.forEach((l) => {
-            if (!transformControl.dragging && selectedLaser !== l) {
-                l.rot.x = THREE.MathUtils.lerp(l.rot.x, kfTilt, 0.1);
+            if (selectedLaser !== l) {
+                l.rot.x = THREE.MathUtils.lerp(l.rot.x, kfTilt, fLerp(0.1));
                 l.rot.y = 0;
-                l.rot.z = THREE.MathUtils.lerp(l.rot.z, -kfPan, 0.1);
+                l.rot.z = THREE.MathUtils.lerp(l.rot.z, -kfPan, fLerp(0.1));
             }
         });
         updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDrop, isSilent, section, melody, buildUp, true);
@@ -6826,13 +8776,13 @@ function animate() {
               const hHex = hueToHex(sectionLaserHues[0], 0.7, 0.18 + energy * 0.12 + beatState.flashDecay * 0.12);
               hazeMaterial.uniforms.color.value.setHex(hHex);
           }
-          hazeMaterial.uniforms.density.value = (0.09 + beatState.flashDecay * 0.14) * CFG.hazeDensity;
+          hazeMaterial.uniforms.density.value = (0.09 + beatState.flashDecay * 0.14) * CFG.hazeDensity * BEAM_HDR_SCALE;
       }
-      hazeSystem.rotation.y += 0.00015; // very slow drift
+      hazeSystem.rotation.y += 0.009 * frameDelta; // very slow drift
     }
 
     // ── Physics & Collision Spot Updates ─────────────────
-    const dt = 1 / 60; // stable physics step
+    const dt = frameDelta; // real elapsed time (clamped in animate())
     
     if (playing) {
         if (isPeakDrop && beatState.isBeat) {
@@ -6846,6 +8796,7 @@ function animate() {
     
     updateConfetti(dt);
     updateFogParticles(dt);
+    updateRainVisuals(dt);
     updateLEDCanvas(dt, energy, bass, mid, high, isPeakDrop);
     updateLaserWriter(dt);
     
@@ -6874,33 +8825,42 @@ function animate() {
           rebuildPostChain();
       }
       rgbShiftAmount.value = 0.0012 + kick * 0.0035;
+      if (glRgbShiftPass) glRgbShiftPass.uniforms.amount.value = rgbShiftAmount.value;
   } else {
       if (lastDronePostState) {
           lastDronePostState = false;
           rgbShiftPass.enabled = fxVhsEnabled;
           rgbShiftAmount.value = 0.0015;
+          if (glRgbShiftPass) glRgbShiftPass.uniforms.amount.value = 0.0015;
           rebuildPostChain();
     }
   }
 
+  // Aim the shadow casters. Must run after the moving-head update, which is what
+  // fills activeBeams, and before the render that consumes the shadow maps.
+  updateShadowCasters();
+
   // Update Volumetric Dynamic Lighting on the Crowd
-  updateCrowdLighting(1 / 60);
+  updateCrowdLighting(frameDelta);
 
   camera.position.add(_camShake);
 
-  // Render pipeline — try TSL postProcessing first, fall back to standard render
-  if (postProcessing && isWebGPU) {
+  const activeCam = isStageBuilderMode ? builderCamera : camera;
+
+  // Render pipeline — EffectComposer (bloom + FX) with a plain render as fallback
+  if (glComposer) {
       try {
-          postProcessing.render();
-      } catch(e) {
-          // PostProcessing failed (e.g. WebGPU context lost or TSL error) — disable and fall back
-          console.warn('PostProcessing.render() failed, switching to WebGL fallback:', e.message || e);
-          postProcessing = null;
-          isWebGPU = false;
-          renderer.render(scene, camera);
+          // The builder uses an orthographic camera; keep the pass in sync with it.
+          if (glRenderPass && glRenderPass.camera !== activeCam) glRenderPass.camera = activeCam;
+          glComposer.render(frameDelta);
+      } catch (e) {
+          console.warn('EffectComposer.render() failed, falling back to direct render:', e.message || e);
+          disposeGLComposer();
+          renderer.toneMapping = THREE.ACESFilmicToneMapping;
+          renderer.render(scene, activeCam);
       }
   } else {
-      renderer.render(scene, camera);
+      renderer.render(scene, activeCam);
   }
 
   if (needsScreenshot) {
@@ -6909,96 +8869,71 @@ function animate() {
   }
 }
 
+// The renderer is constructed synchronously above; this only wires up the post
+// chain and starts the loop. It stays async because the WebGPU experiment used
+// to await renderer.init() here, and callers/tests may still await it.
 async function initRenderer() {
-    try {
-        if (renderer.init) {
-            await renderer.init();
-        }
-        renderer.setAnimationLoop(animate);
-    } catch (e) {
-        console.warn("WebGPURenderer init failed, falling back to WebGLRenderer", e);
-
-        try {
-            // Remove the failed WebGPURenderer DOM element
-            if (renderer.domElement && renderer.domElement.parentNode) {
-                renderer.domElement.parentNode.removeChild(renderer.domElement);
-            }
-
-            renderer = new THREE.WebGLRenderer({
-                antialias: true,
-                powerPreference: "high-performance"
-            });
-            isWebGPU = false;
-            renderer.setSize(W, H);
-            renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-            renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.2;
-            document.getElementById('canvas-container').appendChild(renderer.domElement);
-
-            // PostProcessing might need to be re-initialized for WebGL if it was WebGPU
-            postProcessing = null;
-
-            renderer.setAnimationLoop(animate);
-        } catch (webglError) {
-            console.error("Critical renderer initialization error (WebGL fallback failed):", webglError);
-            const fallbackDiv = document.createElement('div');
-            fallbackDiv.style.position = 'absolute';
-            fallbackDiv.style.top = '50%';
-            fallbackDiv.style.left = '50%';
-            fallbackDiv.style.transform = 'translate(-50%, -50%)';
-            fallbackDiv.style.color = 'white';
-            fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
-            fallbackDiv.style.padding = '20px';
-            fallbackDiv.style.borderRadius = '10px';
-            fallbackDiv.style.fontFamily = 'sans-serif';
-            fallbackDiv.style.zIndex = '9999';
-            fallbackDiv.innerHTML = '<h3>WebGPU/WebGL Error</h3><p>Sorry, your browser or device does not support WebGPU/WebGL rendering which is required for this application.</p>';
-            document.body.appendChild(fallbackDiv);
-
-            // Mock renderer to prevent immediate downstream TypeError crashes in animate loop
-            renderer = {
-                render: () => {},
-                setAnimationLoop: (cb) => {
-                    function loop() { cb(); requestAnimationFrame(loop); }
-                    requestAnimationFrame(loop);
-                },
-                setSize: () => {},
-                setPixelRatio: () => {},
-                toneMapping: THREE.NoToneMapping,
-                init: async () => {},
-                clear: () => {},
-                domElement: Object.assign(document.createElement('canvas'), {
-                    captureStream: () => new MediaStream()
-                })
-            };
-            postProcessing = null;
-            isWebGPU = false;
-
-            if (renderer.setAnimationLoop) renderer.setAnimationLoop(animate);
-        }
-    }
-
-    // ── Set up TSL post-processing AFTER renderer.init() ──────────────────────────
-    // TSL nodes (pass, bloom, etc.) require the renderer backend to be ready.
-    // Creating them before init() causes silent black output.
-    if (isWebGPU) {
-        try {
-            scenePass  = pass(scene, camera);
-            sceneColor = scenePass.getTextureNode('output');
-            bloomNode  = bloom(sceneColor, 1.8, 0.75, 0.1);
-            postProcessing = new RenderPipeline(renderer);
-            postProcessing.outputNode = sceneColor.add(bloomNode).toneMapping(THREE.NeutralToneMapping);
-            console.log('✅ WebGPU PostProcessing (bloom) initialized successfully');
-        } catch(e) {
-            console.warn('⚠️ TSL post-processing setup failed — falling back to plain WebGL render:', e);
-            postProcessing = null;
-            scenePass = sceneColor = bloomNode = null;
-            isWebGPU = false;
-        }
-    }
-
-    // ── Start animation loop (success path) ───────────────────────────────────
+    initGLComposer();
     renderer.setAnimationLoop(animate);
+
+    // Debug handle for performance work: renderer.info carries draw calls and
+    // triangle counts, which is the only way to compare rendering cost between
+    // builds without guessing. Read-only from the app's point of view.
+    if (typeof window !== 'undefined') {
+        window.__laserrave = {
+            get renderer() { return renderer; },
+            get composer() { return glComposer; },
+            get scene() { return scene; },
+            get camera() { return camera; },
+            get fps() { return smoothedFPS; },
+            get info() {
+                const r = renderer && renderer.info;
+                if (!r) return null;
+                return {
+                    drawCalls: r.render.calls,
+                    triangles: r.render.triangles,
+                    programs: r.programs ? r.programs.length : 0,
+                    geometries: r.memory.geometries,
+                    textures: r.memory.textures
+                };
+            },
+            get cfg() { return CFG; },
+            get bloom() { return glBloomPass; },
+            /**
+             * Live brightness trim for the additive beams, relative to the
+             * calibrated BEAM_HDR_SCALE. 1 = as shipped, >1 brighter, <1 dimmer.
+             * Lets a value be dialled in by eye before baking it into the
+             * constant. Not persisted.
+             */
+            setBeamBrightness(k) {
+                if (!this._beamBase) {
+                    this._beamBase = [];
+                    scene.traverse(o => {
+                        const m = o.material;
+                        if (!m || m.blending !== THREE.AdditiveBlending) return;
+                        this._beamBase.push({
+                            m,
+                            opacity: m.opacity,
+                            uOM: (m.uniforms && m.uniforms.uOpacityMultiplier)
+                                ? m.uniforms.uOpacityMultiplier.value : null
+                        });
+                    });
+                }
+                this._beamBase.forEach(e => {
+                    e.m.opacity = e.opacity * k;
+                    if (e.uOM !== null) e.m.uniforms.uOpacityMultiplier.value = e.uOM * k;
+                });
+                return `${this._beamBase.length} additive Materialien auf x${k} gesetzt`;
+            },
+            get shadows() { return typeof getShadowStats === 'function' ? getShadowStats() : null; },
+            /**
+             * Toggles shadows at runtime so their cost can be A/B'd in a single
+             * session, on the same machine and the same scene — the only way to
+             * get a trustworthy before/after number.
+             */
+            setShadows(on) { setShadowQuality(on ? 0 : 2); return getShadowStats(); }
+        };
+    }
 }
 initRenderer();
 
@@ -7206,6 +9141,143 @@ function saveScreenshot() {
   }
 }
 
+// ─── Photo Mode Event Wiring & Snapshot Processing (R5) ──────
+const elBtnPhotoMode = document.getElementById('btn-photo-mode');
+const elPhotoOverlay = document.getElementById('photo-mode-overlay');
+const elPhotoCanvas = document.getElementById('photo-preview-canvas');
+const elPhotoClose = document.getElementById('btn-photo-close');
+const elPhotoResume = document.getElementById('btn-photo-resume');
+const elPhotoSave = document.getElementById('btn-photo-save');
+const elPhotoFovSlider = document.getElementById('photo-fov-slider');
+const elPhotoFovVal = document.getElementById('photo-fov-val');
+const elPhotoRollSlider = document.getElementById('photo-roll-slider');
+const elPhotoRollVal = document.getElementById('photo-roll-val');
+const filterBtns = document.querySelectorAll('.photo-filter-btn');
+
+function renderPhotoSnapshot() {
+    if (!renderer || !renderer.domElement) return;
+
+    // Apply freecam FOV and Roll
+    const prevFov = camera.fov;
+    const prevRoll = camera.rotation.z;
+
+    camera.fov = photoModeManager.freecam.fov;
+    camera.rotation.z = (photoModeManager.freecam.rollDeg * Math.PI) / 180;
+    camera.updateProjectionMatrix();
+
+    // Render clean frame
+    const activeCam = (typeof isStageBuilderMode !== 'undefined' && isStageBuilderMode && typeof builderCamera !== 'undefined') ? builderCamera : camera;
+    renderer.render(scene, activeCam);
+
+    // Copy to snapshot canvas
+    if (!rawSnapshotCanvas) {
+        rawSnapshotCanvas = document.createElement('canvas');
+    }
+    rawSnapshotCanvas.width = renderer.domElement.width || 1280;
+    rawSnapshotCanvas.height = renderer.domElement.height || 720;
+    const rawCtx = rawSnapshotCanvas.getContext('2d');
+    if (rawCtx) {
+        rawCtx.drawImage(renderer.domElement, 0, 0);
+    }
+
+    // Apply currently selected filter to preview canvas
+    if (elPhotoCanvas) {
+        applyPhotoFilter(rawSnapshotCanvas, photoModeManager.currentFilter, { destinationCanvas: elPhotoCanvas });
+    }
+
+    // Restore camera state for live rendering
+    camera.fov = prevFov;
+    camera.rotation.z = prevRoll;
+    camera.updateProjectionMatrix();
+}
+
+function openPhotoMode() {
+    photoModeManager.enter(audioCtx);
+    if (elPhotoOverlay) elPhotoOverlay.style.display = 'flex';
+
+    // Initialize sliders from current camera
+    photoModeManager.setFreecamParameters({
+        fov: camera.fov || 60,
+        rollDeg: 0
+    });
+    if (elPhotoFovSlider) elPhotoFovSlider.value = camera.fov || 60;
+    if (elPhotoFovVal) elPhotoFovVal.textContent = `${Math.round(camera.fov || 60)}°`;
+    if (elPhotoRollSlider) elPhotoRollSlider.value = 0;
+    if (elPhotoRollVal) elPhotoRollVal.textContent = '0°';
+
+    renderPhotoSnapshot();
+}
+
+function closePhotoMode() {
+    photoModeManager.exit(audioCtx);
+    if (elPhotoOverlay) elPhotoOverlay.style.display = 'none';
+}
+
+if (elBtnPhotoMode) {
+    elBtnPhotoMode.addEventListener('click', openPhotoMode);
+}
+
+if (elPhotoClose) elPhotoClose.addEventListener('click', closePhotoMode);
+if (elPhotoResume) elPhotoResume.addEventListener('click', closePhotoMode);
+
+window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && photoModeManager.isActive) {
+        closePhotoMode();
+    }
+});
+
+filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter = btn.dataset.filter;
+        photoModeManager.setFilter(filter);
+        if (rawSnapshotCanvas && elPhotoCanvas) {
+            applyPhotoFilter(rawSnapshotCanvas, photoModeManager.currentFilter, { destinationCanvas: elPhotoCanvas });
+        }
+    });
+});
+
+if (elPhotoFovSlider) {
+    elPhotoFovSlider.addEventListener('input', e => {
+        const val = parseFloat(e.target.value);
+        photoModeManager.setFreecamParameters({ fov: val });
+        if (elPhotoFovVal) elPhotoFovVal.textContent = `${val}°`;
+        renderPhotoSnapshot();
+    });
+}
+
+if (elPhotoRollSlider) {
+    elPhotoRollSlider.addEventListener('input', e => {
+        const val = parseFloat(e.target.value);
+        photoModeManager.setFreecamParameters({ rollDeg: val });
+        if (elPhotoRollVal) elPhotoRollVal.textContent = `${val}°`;
+        renderPhotoSnapshot();
+    });
+}
+
+if (elPhotoSave) {
+    elPhotoSave.addEventListener('click', () => {
+        if (!elPhotoCanvas) return;
+        if (typeof elPhotoCanvas.toBlob === 'function') {
+            elPhotoCanvas.toBlob(blob => {
+                if (!blob) return;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = generatePhotoFilename();
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            }, 'image/png');
+        }
+    });
+}
+
 document.getElementById('btn-render').addEventListener('click', async () => {
     if (!audioBuffer) return;
     
@@ -7261,7 +9333,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             useFileStream = true;
         } else {
             console.warn("showSaveFilePicker not supported. Falling back to RAM. May cause Out of Memory.");
-            alert("Hinweis: Dein Browser unterstützt das direkte Speichern nicht. Das Video wird im Arbeitsspeicher gehalten, was zu einem 'Out of Memory' Fehler führen kann. Bitte nutze Chrome oder Edge.");
+            alert("Heads up: your browser cannot stream the recording straight to disk, so it is held in memory instead. Long recordings may run out of memory. Chrome or Edge is recommended.");
         }
     } catch (e) {
         console.warn("User cancelled save prompt", e);
@@ -7371,7 +9443,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
         }
     } catch (e) {
         console.error("4K render loop failed:", e);
-        alert("Render fehlgeschlagen. WebCodecs oder Canvas-Export wird nicht vollständig unterstützt.");
+        alert("Render failed. This browser does not fully support WebCodecs or canvas export.");
     }
     
     // Reconstruct fake webm/mkv format or return raw chunks
@@ -7395,6 +9467,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
     
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (glComposer) glComposer.setSize(window.innerWidth, window.innerHeight);
     ui.style.display = 'none';
     playing = false;
     isRecording = false;
@@ -7432,5 +9505,869 @@ window.addEventListener('resize', () => {
 
   camera.aspect = renderW / renderH;
   camera.updateProjectionMatrix();
+
+  if (typeof builderCamera !== 'undefined' && builderCamera) {
+      const builderAspect = renderW / renderH;
+      builderCamera.left = -builderFrustumSize * builderAspect / 2;
+      builderCamera.right = builderFrustumSize * builderAspect / 2;
+      builderCamera.top = builderFrustumSize / 2;
+      builderCamera.bottom = -builderFrustumSize / 2;
+      builderCamera.updateProjectionMatrix();
+  }
+
   renderer.setSize(renderW, renderH);
+  // The composer owns its own render targets — they must follow the canvas size,
+  // otherwise the bloom stays at the old resolution and the image goes blurry/stretched.
+  if (glComposer) {
+      glComposer.setSize(renderW, renderH);
+      if (glBloomPass && glBloomPass.resolution) glBloomPass.resolution.set(renderW, renderH);
+  }
 });
+
+// --- NEW UI LISTENERS ---
+const btnLoadPreset = document.getElementById('btn-load-preset');
+const btnSavePreset = document.getElementById('btn-save-preset');
+const paramFxDof = document.getElementById('param-fx-dof');
+const btnMpHost = document.getElementById('btn-mp-host');
+const btnMpJoin = document.getElementById('btn-mp-join');
+const inputMpRoom = document.getElementById('input-mp-room');
+const mpStatus = document.getElementById('mp-status');
+
+if (btnLoadPreset) {
+  btnLoadPreset.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const savedCfg = JSON.parse(evt.target.result);
+        Object.assign(CFG, savedCfg);
+        buildStageEnvironment();
+        initLasers(CFG.stageSize === 'large' ? 180 : 40);
+        initMovingHeads(CFG.stageSize === 'large' ? 120 : 20);
+        initPyroSystems();
+        updateGoboCanvas(CFG.theme);
+        alert('Preset loaded!');
+      } catch(err) {
+        console.error('Error loading preset', err);
+        alert('Failed to load preset');
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+if (btnSavePreset) {
+  btnSavePreset.addEventListener('click', () => {
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(CFG, null, 2));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute('href', dataStr);
+    dlAnchorElem.setAttribute('download', 'lasershow_preset.json');
+    dlAnchorElem.click();
+  });
+}
+
+if (paramFxDof) {
+  paramFxDof.addEventListener('change', e => {
+    fxDofEnabled = e.target.checked;
+    rebuildPostChain();
+        syncScreenFxStyles();
+  });
+}
+
+if (btnMpHost) {
+    btnMpHost.addEventListener('click', async () => {
+        if (mpStatus) mpStatus.textContent = 'Starting Host...';
+        window.mpSystem = new Multiplayer(true);
+        window.mpSystem.onConnectedAsHost = (id) => {
+            if (mpStatus) {
+                mpStatus.textContent = `Hosting Room: ${id} (Send to friends!)`;
+                mpStatus.style.color = '#00ffaa';
+            }
+            if (inputMpRoom) inputMpRoom.style.display = 'none';
+            if (btnMpHost) btnMpHost.disabled = true;
+            if (btnMpJoin) btnMpJoin.disabled = true;
+
+            if (mpBroadcastTimer) clearInterval(mpBroadcastTimer);
+            mpBroadcastTimer = setInterval(() => {
+                if (!window.mpSystem || !window.mpSystem.isHost) return;
+
+                const uiState = {};
+                document.querySelectorAll('[id^="param-"]').forEach(el => {
+                    if (el.type === 'checkbox' || el.type === 'radio') {
+                        uiState[el.id] = el.checked;
+                    } else if (el.type !== 'file') {
+                        uiState[el.id] = el.value;
+                    }
+                });
+
+                window.mpSystem.broadcastState({ cfg: CFG, uiState });
+
+                let time = 0;
+                if (State.playing && State.audioCtx) {
+                    time = State.audioCtx.currentTime - playbackStartCtxTime;
+                } else {
+                    time = State.playbackStartOffset;
+                }
+                window.mpSystem.broadcastPlayback(time, State.playing);
+            }, 100);
+        };
+
+        try {
+            await window.mpSystem.init();
+        } catch (err) {
+            if (mpStatus) mpStatus.textContent = 'Error hosting room.';
+            console.error(err);
+        }
+    });
+}
+
+if (btnMpJoin) {
+    btnMpJoin.addEventListener('click', async () => {
+        if (!inputMpRoom) return;
+        if (inputMpRoom.style.display === 'none') {
+            inputMpRoom.style.display = 'block';
+            return;
+        }
+
+        const roomId = inputMpRoom.value.trim();
+        if (!roomId) return;
+
+        if (mpStatus) mpStatus.textContent = 'Joining Room...';
+        window.mpSystem = new Multiplayer(false, roomId);
+
+        window.mpSystem.onConnectedAsClient = () => {
+            if (mpStatus) {
+                mpStatus.textContent = 'Connected to VJ Host! Waiting for Audio...';
+                mpStatus.style.color = '#00aaff';
+            }
+            inputMpRoom.style.display = 'none';
+            if (btnMpHost) btnMpHost.disabled = true;
+            if (btnMpJoin) btnMpJoin.disabled = true;
+
+            const livePanel = document.getElementById('panel-live');
+            if (livePanel) {
+                livePanel.style.pointerEvents = 'none';
+                livePanel.style.opacity = '0.5';
+            }
+
+            const droneBtn = document.getElementById('param-dronecam');
+            if (droneBtn && !droneBtn.checked) {
+                droneBtn.checked = true;
+                droneBtn.dispatchEvent(new Event('change'));
+            }
+        };
+
+        try {
+            await window.mpSystem.init();
+        } catch (err) {
+            if (mpStatus) mpStatus.textContent = 'Error joining room.';
+            console.error(err);
+        }
+    });
+}
+
+// ─────────────────────────────────────────────
+//  STAGE BUILDER CONTROLLER (R1) & STAGE PRESETS (R2)
+// ─────────────────────────────────────────────
+
+let isStageBuilderMode = false;
+const builderFrustumSize = 70;
+const builderAspect = window.innerWidth / window.innerHeight;
+const builderCamera = new THREE.OrthographicCamera(
+    -builderFrustumSize * builderAspect / 2,
+    builderFrustumSize * builderAspect / 2,
+    builderFrustumSize / 2,
+    -builderFrustumSize / 2,
+    0.1,
+    500
+);
+builderCamera.position.set(0, 50, 0);
+builderCamera.up.set(0, 0, -1);
+builderCamera.lookAt(0, 0, 0);
+
+const builderGrid = new THREE.GridHelper(100, 200, 0x00ffcc, 0x1a333a);
+builderGrid.position.y = 0.01;
+builderGrid.visible = false;
+scene.add(builderGrid);
+
+const builderGroup = new THREE.Group();
+builderGroup.visible = false;
+scene.add(builderGroup);
+
+let builderActiveType = 'select';
+let builderGhostMesh = null;
+let builderGhostHeight = 0.0;
+let builderGhostRotY = 0;
+let builderFixtures = [];
+let builderSelectedFixture = null;
+let builderSelectionBox = null;
+const builderRaycaster = new THREE.Raycaster();
+const builderMouse = new THREE.Vector2();
+const builderGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const builderPlaneIntersect = new THREE.Vector3();
+let isBuilderDragging = false;
+
+function createFixtureMesh(fixture, isGhost = false) {
+    const group = new THREE.Group();
+    const type = fixture.type;
+    const opacity = isGhost ? 0.5 : 0.95;
+    const transparent = true;
+
+    if (type === 'truss') {
+        const mat = new THREE.MeshStandardMaterial({ color: 0x888899, metalness: 0.5, roughness: 0.5, opacity, transparent });
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(4, 0.4, 0.4), mat);
+        group.add(mesh);
+    } else if (type === 'screen') {
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: isGhost, opacity, transparent });
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 0.2), mat);
+        group.add(mesh);
+    } else if (type === 'laser') {
+        const mat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff88, emissiveIntensity: isGhost ? 0.2 : 0.6, opacity, transparent });
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.8), mat);
+        group.add(mesh);
+    } else if (type === 'movinghead') {
+        const mat = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x888800, emissiveIntensity: isGhost ? 0.2 : 0.5, opacity, transparent });
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.8, 16), mat);
+        group.add(mesh);
+    } else if (type === 'co2') {
+        const mat = new THREE.MeshStandardMaterial({ color: 0xff5500, emissive: 0x882200, emissiveIntensity: isGhost ? 0.2 : 0.5, opacity, transparent });
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.6, 12), mat);
+        group.add(mesh);
+    } else if (type === 'uplight') {
+        const mat = new THREE.MeshStandardMaterial({ color: 0xff00ff, emissive: 0x880088, emissiveIntensity: isGhost ? 0.2 : 0.5, opacity, transparent });
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.3, 12), mat);
+        group.add(mesh);
+    }
+
+    group.position.set(fixture.position.x, fixture.position.y, fixture.position.z);
+    group.rotation.set(fixture.rotation?.x || 0, fixture.rotation?.y || 0, fixture.rotation?.z || 0);
+    group.userData.fixture = fixture;
+    return group;
+}
+
+function updateBuilderGhost() {
+    if (builderGhostMesh) {
+        scene.remove(builderGhostMesh);
+        builderGhostMesh = null;
+    }
+    if (isStageBuilderMode && builderActiveType !== 'select') {
+        const dummyFixture = {
+            type: builderActiveType,
+            position: { x: 0, y: builderGhostHeight, z: 0 },
+            rotation: { x: 0, y: builderGhostRotY, z: 0 }
+        };
+        builderGhostMesh = createFixtureMesh(dummyFixture, true);
+        scene.add(builderGhostMesh);
+    }
+}
+
+function syncBuilderVisuals() {
+    while (builderGroup.children.length > 0) {
+        builderGroup.remove(builderGroup.children[0]);
+    }
+    if (builderSelectionBox) {
+        scene.remove(builderSelectionBox);
+        builderSelectionBox = null;
+    }
+
+    builderFixtures.forEach(fix => {
+        const mesh = createFixtureMesh(fix, false);
+        builderGroup.add(mesh);
+    });
+
+    if (builderSelectedFixture) {
+        const selectedMesh = builderGroup.children.find(c => c.userData.fixture?.id === builderSelectedFixture.id);
+        if (selectedMesh) {
+            builderSelectionBox = new THREE.BoxHelper(selectedMesh, 0x00ffcc);
+            scene.add(builderSelectionBox);
+            updateBuilderInspectorUI();
+        }
+    }
+}
+
+function updateBuilderInspectorUI() {
+    const inspectorEl = document.getElementById('builder-inspector');
+    const inspectIdEl = document.getElementById('builder-inspect-id');
+    const heightEl = document.getElementById('builder-height');
+    const heightValEl = document.getElementById('builder-height-val');
+
+    if (!inspectorEl) return;
+
+    if (builderSelectedFixture) {
+        inspectorEl.style.display = 'block';
+        if (inspectIdEl) inspectIdEl.textContent = `${builderSelectedFixture.type} (${builderSelectedFixture.id})`;
+        if (heightEl) heightEl.value = builderSelectedFixture.position.y;
+        if (heightValEl) heightValEl.textContent = `${builderSelectedFixture.position.y.toFixed(1)}m`;
+    } else {
+        inspectorEl.style.display = 'none';
+    }
+}
+
+function selectBuilderFixture(fixture) {
+    builderSelectedFixture = fixture;
+    if (builderSelectionBox) {
+        scene.remove(builderSelectionBox);
+        builderSelectionBox = null;
+    }
+    if (fixture) {
+        const selectedMesh = builderGroup.children.find(c => c.userData.fixture?.id === fixture.id);
+        if (selectedMesh) {
+            builderSelectionBox = new THREE.BoxHelper(selectedMesh, 0x00ffcc);
+            scene.add(builderSelectionBox);
+        }
+    }
+    updateBuilderInspectorUI();
+}
+
+function setStageBuilderMode(active) {
+    isStageBuilderMode = active;
+    const palette = document.getElementById('stage-builder-palette');
+
+    if (active) {
+        builderGrid.visible = true;
+        builderGroup.visible = true;
+        if (palette) palette.classList.remove('hidden');
+
+        const loaded = loadLayoutFromStorage();
+        builderFixtures = loaded && Array.isArray(loaded.fixtures) ? loaded.fixtures : [];
+        syncBuilderVisuals();
+        updateBuilderGhost();
+    } else {
+        builderGrid.visible = false;
+        builderGroup.visible = false;
+        if (builderGhostMesh) {
+            scene.remove(builderGhostMesh);
+            builderGhostMesh = null;
+        }
+        if (builderSelectionBox) {
+            scene.remove(builderSelectionBox);
+            builderSelectionBox = null;
+        }
+        if (palette) palette.classList.add('hidden');
+    }
+}
+
+// Stage Builder Pointer & Keyboard Interactions
+window.addEventListener('pointermove', e => {
+    if (!isStageBuilderMode) return;
+    builderMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    builderMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    builderRaycaster.setFromCamera(builderMouse, builderCamera);
+    if (builderRaycaster.ray.intersectPlane(builderGroundPlane, builderPlaneIntersect)) {
+        const snappedX = snapToGrid(builderPlaneIntersect.x, 0.5);
+        const snappedZ = snapToGrid(builderPlaneIntersect.z, 0.5);
+
+        if (builderGhostMesh) {
+            builderGhostMesh.position.set(snappedX, builderGhostHeight, snappedZ);
+            builderGhostMesh.rotation.y = builderGhostRotY;
+        }
+
+        if (isBuilderDragging && builderSelectedFixture) {
+            builderSelectedFixture.position.x = snappedX;
+            builderSelectedFixture.position.z = snappedZ;
+            const mesh = builderGroup.children.find(c => c.userData.fixture?.id === builderSelectedFixture.id);
+            if (mesh) {
+                mesh.position.set(snappedX, builderSelectedFixture.position.y, snappedZ);
+                if (builderSelectionBox) builderSelectionBox.update();
+            }
+        }
+    }
+});
+
+window.addEventListener('pointerdown', e => {
+    if (!isStageBuilderMode) return;
+    if (e.target.closest('#stage-builder-palette') || e.target.closest('#ui-container')) return;
+
+    builderMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    builderMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    builderRaycaster.setFromCamera(builderMouse, builderCamera);
+
+    if (builderActiveType === 'select') {
+        const intersects = builderRaycaster.intersectObjects(builderGroup.children, true);
+        if (intersects.length > 0) {
+            let root = intersects[0].object;
+            while (root.parent && root.parent !== builderGroup) root = root.parent;
+            if (root.userData.fixture) {
+                selectBuilderFixture(root.userData.fixture);
+                isBuilderDragging = true;
+            }
+        } else {
+            selectBuilderFixture(null);
+        }
+    } else {
+        if (builderRaycaster.ray.intersectPlane(builderGroundPlane, builderPlaneIntersect)) {
+            const snappedX = snapToGrid(builderPlaneIntersect.x, 0.5);
+            const snappedZ = snapToGrid(builderPlaneIntersect.z, 0.5);
+            const newFixture = {
+                id: `fix-${builderActiveType}-${Date.now().toString(36)}-${Math.floor(Math.random()*1000)}`,
+                type: builderActiveType,
+                position: { x: snappedX, y: builderGhostHeight, z: snappedZ },
+                rotation: { x: 0, y: builderGhostRotY, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+                properties: {}
+            };
+            builderFixtures.push(newFixture);
+            syncBuilderVisuals();
+            selectBuilderFixture(newFixture);
+        }
+    }
+});
+
+window.addEventListener('pointerup', () => {
+    isBuilderDragging = false;
+});
+
+window.addEventListener('keydown', e => {
+    if (!isStageBuilderMode) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (builderSelectedFixture && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+            builderFixtures = builderFixtures.filter(f => f.id !== builderSelectedFixture.id);
+            selectBuilderFixture(null);
+            syncBuilderVisuals();
+        }
+    }
+});
+
+// Stage Builder UI Bindings
+const btnStageBuilder = document.getElementById('btn-stage-builder');
+if (btnStageBuilder) {
+    btnStageBuilder.addEventListener('click', () => {
+        setStageBuilderMode(!isStageBuilderMode);
+    });
+}
+
+const btnBuilderClose = document.getElementById('btn-builder-close');
+if (btnBuilderClose) {
+    btnBuilderClose.addEventListener('click', () => {
+        setStageBuilderMode(false);
+    });
+}
+
+const btnBuilderSave = document.getElementById('btn-builder-save');
+if (btnBuilderSave) {
+    btnBuilderSave.addEventListener('click', () => {
+        saveLayoutToStorage({ version: '1.0.0', name: 'Custom Stage', fixtures: builderFixtures });
+        alert('Custom layout saved to localStorage!');
+    });
+}
+
+const btnBuilderLoad = document.getElementById('btn-builder-load');
+if (btnBuilderLoad) {
+    btnBuilderLoad.addEventListener('click', () => {
+        const loaded = loadLayoutFromStorage();
+        builderFixtures = loaded.fixtures || [];
+        syncBuilderVisuals();
+    });
+}
+
+const btnBuilderClear = document.getElementById('btn-builder-clear');
+if (btnBuilderClear) {
+    btnBuilderClear.addEventListener('click', () => {
+        builderFixtures = [];
+        selectBuilderFixture(null);
+        syncBuilderVisuals();
+    });
+}
+
+const btnTemplateFestival = document.getElementById('btn-template-festival');
+if (btnTemplateFestival) {
+    btnTemplateFestival.addEventListener('click', () => {
+        const t = getTemplateLayout('Large Festival');
+        builderFixtures = t.fixtures;
+        syncBuilderVisuals();
+    });
+}
+
+const btnTemplateClub = document.getElementById('btn-template-club');
+if (btnTemplateClub) {
+    btnTemplateClub.addEventListener('click', () => {
+        const t = getTemplateLayout('Small Club');
+        builderFixtures = t.fixtures;
+        syncBuilderVisuals();
+    });
+}
+
+const btnBuilderLaunch = document.getElementById('btn-builder-launch');
+if (btnBuilderLaunch) {
+    btnBuilderLaunch.addEventListener('click', () => {
+        saveLayoutToStorage({ version: '1.0.0', name: 'Custom Stage', fixtures: builderFixtures });
+        compiledCustomLayout = compileCustomStageLayout({ fixtures: builderFixtures });
+        CFG.stagePreset = 'custom';
+        const sel = document.getElementById('param-stage-preset');
+        if (sel) sel.value = 'custom';
+        setStageBuilderMode(false);
+        buildStageEnvironment();
+        initLasers();
+        initMovingHeads();
+        initPyroSystems();
+        initUpLights();
+        initCrowd();
+    });
+}
+
+document.querySelectorAll('.palette-btn[data-type]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.palette-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        builderActiveType = btn.dataset.type;
+        updateBuilderGhost();
+    });
+});
+
+const builderHeightSlider = document.getElementById('builder-height');
+if (builderHeightSlider) {
+    builderHeightSlider.addEventListener('input', e => {
+        const val = snapToGrid(+e.target.value, 0.5);
+        builderGhostHeight = val;
+        if (builderSelectedFixture) {
+            builderSelectedFixture.position.y = val;
+            const mesh = builderGroup.children.find(c => c.userData.fixture?.id === builderSelectedFixture.id);
+            if (mesh) mesh.position.y = val;
+            if (builderSelectionBox) builderSelectionBox.update();
+            const valEl = document.getElementById('builder-height-val');
+            if (valEl) valEl.textContent = `${val.toFixed(1)}m`;
+        }
+        if (builderGhostMesh) builderGhostMesh.position.y = val;
+    });
+}
+
+['15', '45', '90'].forEach(degStr => {
+    const rotBtn = document.getElementById(`btn-builder-rot-${degStr}`);
+    if (rotBtn) {
+        rotBtn.addEventListener('click', () => {
+            const rad = (+degStr * Math.PI) / 180;
+            builderGhostRotY = normalizeYaw(builderGhostRotY + rad);
+            if (builderSelectedFixture) {
+                const currentRot = builderSelectedFixture.rotation?.y || 0;
+                builderSelectedFixture.rotation = builderSelectedFixture.rotation || { x: 0, y: 0, z: 0 };
+                builderSelectedFixture.rotation.y = normalizeYaw(currentRot + rad);
+                const mesh = builderGroup.children.find(c => c.userData.fixture?.id === builderSelectedFixture.id);
+                if (mesh) mesh.rotation.y = builderSelectedFixture.rotation.y;
+                if (builderSelectionBox) builderSelectionBox.update();
+            }
+            if (builderGhostMesh) builderGhostMesh.rotation.y = builderGhostRotY;
+        });
+    }
+});
+
+const btnBuilderDeleteFixture = document.getElementById('btn-builder-delete-fixture');
+if (btnBuilderDeleteFixture) {
+    btnBuilderDeleteFixture.addEventListener('click', () => {
+        if (builderSelectedFixture) {
+            builderFixtures = builderFixtures.filter(f => f.id !== builderSelectedFixture.id);
+            selectBuilderFixture(null);
+            syncBuilderVisuals();
+        }
+    });
+}
+
+// Stage Preset Dropdown Listener
+const stagePresetSelect = document.getElementById('param-stage-preset');
+if (stagePresetSelect) {
+    stagePresetSelect.addEventListener('change', e => {
+        const presetKey = e.target.value;
+        CFG.stagePreset = presetKey;
+
+        if (presetKey === 'custom') {
+            const layout = loadLayoutFromStorage();
+            compiledCustomLayout = compileCustomStageLayout(layout);
+        } else {
+            const preset = getStagePreset(presetKey);
+            CFG.hazeDensity = preset.hazeDensity;
+            const hazeSlider = document.getElementById('param-haze');
+            const hazeVal = document.getElementById('val-haze');
+            if (hazeSlider) hazeSlider.value = Math.round(preset.hazeDensity * 100);
+            if (hazeVal) hazeVal.textContent = `${Math.round(preset.hazeDensity * 100)}%`;
+
+            if (preset.forcedTheme) {
+                CFG.theme = preset.forcedTheme;
+                const themeSel = document.getElementById('param-theme');
+                if (themeSel) themeSel.value = preset.forcedTheme;
+                refreshLaserColors();
+            }
+
+            if (preset.cameraPreset) {
+                camera.position.set(preset.cameraPreset.x, preset.cameraPreset.y, preset.cameraPreset.z);
+                camera.fov = preset.cameraPreset.fov;
+                camera.updateProjectionMatrix();
+                controls.target.set(0, 0, 0);
+                controls.update();
+            }
+        }
+
+        buildStageEnvironment();
+        initLasers();
+        initMovingHeads();
+        initPyroSystems();
+        initUpLights();
+        initCrowd();
+    });
+}
+
+// ─── 3D DJ Avatar Toggle Listener (R6) ───────────────────────────
+const djAvatarToggle = document.getElementById('param-djavatar');
+if (djAvatarToggle) {
+    djAvatarToggle.addEventListener('change', e => {
+        djAvatarEnabled = !!e.target.checked;
+        if (djAvatarRig && djAvatarRig.root) {
+            djAvatarRig.root.visible = djAvatarEnabled;
+        }
+    });
+}
+
+// ─── Web MIDI Controller Integration UI & Dispatcher (R7) ────────
+const midiIndicatorEl = document.getElementById('midi-status-indicator');
+const midiModalOverlay = document.getElementById('midi-modal-overlay');
+const btnMidiPanel = document.getElementById('btn-midi-panel');
+const btnMidiClose = document.getElementById('btn-midi-close');
+const btnMidiDone = document.getElementById('btn-midi-done');
+const btnMidiReset = document.getElementById('btn-midi-reset');
+const midiDeviceListEl = document.getElementById('midi-device-list');
+const midiTableEl = document.getElementById('midi-mapping-table');
+
+function updateMidiStatusUI() {
+    if (midiIndicatorEl) {
+        midiIndicatorEl.style.display = midiManager.isConnected ? 'block' : 'none';
+        midiIndicatorEl.textContent = midiManager.isConnected ? '🎹 MIDI Connected' : '🎹 MIDI Offline';
+    }
+    if (midiDeviceListEl) {
+        if (midiManager.inputs.length > 0) {
+            const names = midiManager.inputs.map(i => i.name).join(', ');
+            midiDeviceListEl.textContent = `Connected Inputs (${midiManager.inputs.length}): ${names}`;
+            midiDeviceListEl.style.color = '#00ffcc';
+        } else {
+            midiDeviceListEl.textContent = 'Detected Inputs: None (Connect a USB MIDI Controller)';
+            midiDeviceListEl.style.color = '#888';
+        }
+    }
+}
+
+function renderMidiMappingTable() {
+    if (!midiTableEl) return;
+    midiTableEl.innerHTML = '';
+
+    const paramLabels = {
+        intensity: 'Laser Intensity',
+        hazeDensity: 'Haze Density',
+        spread: 'Laser Spread',
+        speed: 'Laser Speed',
+        bloom: 'Bloom Strength',
+        dropTrigger: 'Manual Drop Trigger',
+        co2Fire: 'Fire CO2 Jet Blast',
+        autoCamToggle: 'Toggle Auto-Cam',
+        themeCycle: 'Cycle Color Theme',
+        cameraPan: 'Camera Orbit Pan'
+    };
+
+    for (const [key, mapping] of Object.entries(midiManager.mappings)) {
+        const row = document.createElement('div');
+        row.className = 'midi-map-row';
+
+        const label = document.createElement('div');
+        label.className = 'midi-param-label';
+        label.textContent = paramLabels[key] || mapping.label || key;
+
+        const badge = document.createElement('div');
+        badge.className = 'midi-code-badge';
+        if (mapping.type === 'pitchbend') {
+            badge.textContent = 'Pitch Bend';
+        } else if (mapping.type === 'note') {
+            badge.textContent = `Note ${mapping.number}`;
+        } else {
+            badge.textContent = `CC ${mapping.number}`;
+        }
+
+        const barContainer = document.createElement('div');
+        barContainer.className = 'midi-value-bar-container';
+        const barFill = document.createElement('div');
+        barFill.className = 'midi-value-bar-fill';
+        const recentVal = midiManager.recentValues[mapping.number] ?? 0;
+        barFill.style.width = `${Math.min(100, Math.max(0, recentVal * 100))}%`;
+        barContainer.appendChild(barFill);
+
+        const learnBtn = document.createElement('button');
+        learnBtn.className = `midi-learn-btn ${midiManager.isLearning && midiManager.learningTarget === key ? 'learning' : ''}`;
+        learnBtn.textContent = (midiManager.isLearning && midiManager.learningTarget === key) ? 'Learning...' : 'Learn';
+        learnBtn.addEventListener('click', () => {
+            if (midiManager.isLearning && midiManager.learningTarget === key) {
+                midiManager.cancelLearn();
+            } else {
+                midiManager.startLearn(key);
+            }
+            renderMidiMappingTable();
+        });
+
+        row.appendChild(label);
+        row.appendChild(badge);
+        row.appendChild(barContainer);
+        row.appendChild(learnBtn);
+        midiTableEl.appendChild(row);
+    }
+}
+
+// Wire real-time MIDI parameter callbacks to simulation
+const midiCallbacks = {
+    intensity: (val) => {
+        CFG.intensity = val;
+        const slider = document.getElementById('param-intensity');
+        if (slider) slider.value = val;
+    },
+    hazeDensity: (val) => {
+        CFG.hazeDensity = val;
+        const slider = document.getElementById('param-haze');
+        const valEl = document.getElementById('val-haze');
+        if (slider) slider.value = Math.round(val * 100);
+        if (valEl) valEl.textContent = `${Math.round(val * 100)}%`;
+    },
+    spread: (val) => {
+        CFG.spread = val;
+        const slider = document.getElementById('param-spread');
+        if (slider) slider.value = val;
+    },
+    speed: (val) => {
+        CFG.speed = val;
+        const slider = document.getElementById('param-speed');
+        if (slider) slider.value = val;
+    },
+    bloom: (val) => {
+        // The CC 74 mapping is declared as min 0.0 / max 2.0 in MIDI_CONFIG, so `val`
+        // arrives in [0, 2]; scale it so a centred knob lands near the default 0.55.
+        glBloomStrength = THREE.MathUtils.clamp(val, 0, 2) * 0.6;
+        if (glBloomPass) glBloomPass.strength = glBloomStrength;
+    },
+    dropTrigger: () => {
+        isPeakDrop = true;
+        setTimeout(() => { isPeakDrop = false; }, 3000);
+    },
+    co2Fire: () => {
+        triggerFogJet(-28, 0.2, -22, 1.5, 0.4, 0.4);
+        triggerFogJet(28, 0.2, -22, -1.5, 0.4, 0.4);
+    },
+    autoCamToggle: (state) => {
+        autoCamEnabled = (typeof state === 'boolean') ? state : !autoCamEnabled;
+        const chk = document.getElementById('param-autocam');
+        if (chk) chk.checked = autoCamEnabled;
+    },
+    themeCycle: () => {
+        const themeSelect = document.getElementById('param-theme');
+        if (themeSelect) {
+            const options = Array.from(themeSelect.options);
+            const nextIdx = (themeSelect.selectedIndex + 1) % options.length;
+            themeSelect.selectedIndex = nextIdx;
+            CFG.theme = options[nextIdx].value;
+            refreshLaserColors();
+        }
+    },
+    cameraPan: (val) => {
+        if (controls && controls.target) {
+            camera.position.x += val * 0.4;
+            controls.update();
+        }
+    }
+};
+
+// ── MIDI Manager wiring ──────────────────────────────────────────────────────
+// The manager re-binds every input on hotplug, so the dispatch context lives
+// inside it rather than being patched onto input.onmidimessage from out here.
+midiManager.setMessageContext({
+    state: { triggers: {} },
+    cfg: CFG,
+    callbacks: midiCallbacks
+});
+
+midiManager.onStateChange(() => {
+    updateMidiStatusUI();
+    renderMidiMappingTable();
+});
+
+midiManager.onMessage(() => {
+    renderMidiMappingTable();
+});
+
+/**
+ * Connects to Web MIDI. Called on demand (opening the MIDI panel) and
+ * automatically at startup only when the permission has already been granted —
+ * prompting every visitor for MIDI access before they asked for it is hostile,
+ * and in Chrome an unanswered prompt blocks the promise indefinitely.
+ */
+function connectMIDI() {
+    return midiManager.initMIDIAccess().then((ok) => {
+        updateMidiStatusUI();
+        return ok;
+    });
+}
+
+if (typeof navigator !== 'undefined' && navigator.requestMIDIAccess) {
+    if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'midi', sysex: false })
+            .then(status => { if (status.state === 'granted') connectMIDI(); })
+            .catch(() => { /* Firefox/Safari don't expose the midi permission — wait for the panel */ });
+    }
+}
+
+if (btnMidiPanel) {
+    btnMidiPanel.addEventListener('click', () => {
+        connectMIDI(); // opening the panel is the explicit user gesture that justifies the prompt
+        isMidiModalOpen = true;
+        if (midiModalOverlay) midiModalOverlay.style.display = 'flex';
+        updateMidiStatusUI();
+        renderMidiMappingTable();
+    });
+}
+
+if (btnMidiClose) {
+    btnMidiClose.addEventListener('click', () => {
+        isMidiModalOpen = false;
+        if (midiModalOverlay) midiModalOverlay.style.display = 'none';
+        midiManager.cancelLearn();
+    });
+}
+
+if (btnMidiDone) {
+    btnMidiDone.addEventListener('click', () => {
+        isMidiModalOpen = false;
+        if (midiModalOverlay) midiModalOverlay.style.display = 'none';
+        midiManager.cancelLearn();
+        midiManager.saveToStorage();
+    });
+}
+
+if (btnMidiReset) {
+    btnMidiReset.addEventListener('click', () => {
+        midiManager.mappings = JSON.parse(JSON.stringify(MIDI_CONFIG.defaultMappings));
+        midiManager.saveToStorage();
+        renderMidiMappingTable();
+    });
+}
+
+// ─── Offline PWA & Service Worker Registration (R8) ──────────────
+// ── Service Worker ───────────────────────────────────────────────────────────
+// Only in a production build. During development Vite serves every module as a
+// separate request under /src/ and /node_modules/.vite/, and a caching service
+// worker will happily hand back yesterday's copy of one module next to today's
+// copy of another. The result is a half-updated app that fails in ways that look
+// nothing like the code on disk.
+//
+// Registering is not enough to undo: a worker installed by an earlier build stays
+// in control of the origin until something removes it, so dev also actively tears
+// down any worker and cache it finds.
+if (import.meta.env && import.meta.env.PROD) {
+    registerServiceWorker('/sw.js');
+} else if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations()
+        .then(async (regs) => {
+            if (!regs.length) return;
+            await Promise.all(regs.map(r => r.unregister()));
+            if (typeof caches !== 'undefined') {
+                const keys = await caches.keys();
+                await Promise.all(keys.filter(k => k.startsWith('laserrave-')).map(k => caches.delete(k)));
+            }
+            console.warn('[PWA] Removed a service worker left over from a production build. ' +
+                         'Reload once to make sure every module comes from the dev server.');
+        })
+        .catch(() => { /* not fatal in dev */ });
+}
+
+

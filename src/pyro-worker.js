@@ -80,7 +80,7 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
         const sys = systems.get(id);
         if (!sys) return;
 
-        const { dt, globalT, energy, bass, kick, windX, windY, pyroIntensity, isPeak } = data;
+        const { dt, globalT, energy, bass, mid, high, kick, windX, windY, pyroIntensity, isPeak } = data;
 
         // SharedArrayBuffer buffers
         let posArray   = sys.posArray;
@@ -90,21 +90,24 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
         let colorArray = sys.colorArray;
 
         // Burst triggering
-        const triggerThreshold = 0.65;
-        if (isPeak || energy > triggerThreshold || kick > 0.8) {
-            const targetBurst = isPeak ? 1.0 : (energy > triggerThreshold ? 0.7 : 0.4);
+        const triggerThreshold = 0.75; // Higher threshold so it's off more often
+        if (isPeak || (kick > 0.85 && energy > 0.6)) {
+            const targetBurst = isPeak ? 1.0 : 0.7;
             sys.burstIntensity = Math.max(sys.burstIntensity, targetBurst);
         }
-        sys.burstIntensity *= Math.pow(0.94, dt * 60);
+        sys.burstIntensity *= Math.pow(0.85, dt * 60); // Faster decay to turn off sharply
 
-        const turbulenceStr = 0.8 + energy * 1.5 + sys.burstIntensity * 2.0;
-        const thermalStr    = 1.2 + energy * 2.0 + sys.burstIntensity * 3.0;
+        const turbulenceStr = 0.8 + energy * 1.5 + sys.burstIntensity * 2.0 + (mid || 0) * 2.5;
+        const thermalStr    = 1.5 + energy * 2.0 + sys.burstIntensity * 5.0;
 
-        const effectiveIntensity = Math.max(sys.burstIntensity, energy * 0.5) * pyroIntensity;
-        const emitRateMultiplier = 25.0;
+        const effectiveIntensity = sys.burstIntensity * pyroIntensity; // Only active during bursts
+        
+        // Emit only during active bursts
+        const emitRateMultiplier = sys.burstIntensity > 0.1 ? 35.0 : 0.0;
+        
         const emitRate = sys.type === 'flame'
-            ? (bass * 150 + (isPeak ? 200 : 0)) * effectiveIntensity * emitRateMultiplier
-            : (energy * 100 + (isPeak ? 150 : 0)) * effectiveIntensity * emitRateMultiplier;
+            ? (bass * 150 + (isPeak ? 300 : 0)) * effectiveIntensity * emitRateMultiplier
+            : (energy * 100 + (isPeak ? 200 : 0)) * effectiveIntensity * emitRateMultiplier;
 
         sys.emitAccum += emitRate * dt;
         while (sys.emitAccum >= 1) {
@@ -124,23 +127,25 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
                 sys.py[idx] = sys.originY;
                 sys.pz[idx] = sys.originZ + (Math.random() - 0.5) * 0.4;
 
-                const power = 0.5 + sys.burstIntensity * 0.5 + (isPeak ? 0.5 : 0);
+                // Dynamic height (speed and lifetime scaled by burstIntensity and bass)
+                const power = 0.5 + sys.burstIntensity * 1.5 + (isPeak ? 1.0 : 0);
                 const spd = sys.type === 'flame'
-                    ? (1.5 + Math.random() * 2.0 + bass * 5.0) * power
-                    : (3.0 + Math.random() * 5.0 + energy * 8.0) * power;
+                    ? (1.5 + Math.random() * 2.0 + bass * 8.0) * power
+                    : (3.0 + Math.random() * 5.0 + energy * 6.0 + (high || 0) * 10.0) * power;
 
                 sys.vx[idx] = sys.emitDir.x * spd + (Math.random() - 0.5) * sys.spread * spd;
                 sys.vy[idx] = sys.emitDir.y * spd + (Math.random() - 0.5) * sys.spread * spd * 0.5;
                 sys.vz[idx] = sys.emitDir.z * spd + (Math.random() - 0.5) * sys.spread * spd;
 
                 sys.age[idx] = 0;
+                // Lifetime scales with power to make high bursts last longer (reach higher)
                 sys.lifetime[idx] = sys.type === 'flame'
-                    ? (0.6 + Math.random() * 1.2) * (0.8 + power * 0.4)
-                    : (0.3 + Math.random() * 0.7) * (0.8 + power * 0.4);
+                    ? (0.4 + Math.random() * 0.8) * (0.6 + power * 0.4)
+                    : (0.3 + Math.random() * 0.6) * (0.6 + power * 0.4);
 
                 sys.size[idx] = sys.type === 'flame'
-                    ? (0.6 + Math.random() * 1.5) * power
-                    : (0.2 + Math.random() * 0.4) * power;
+                    ? (0.8 + Math.random() * 2.2) * (0.8 + sys.burstIntensity * 0.5)
+                    : (0.2 + Math.random() * 0.5) * (0.8 + sys.burstIntensity * 0.5);
             }
             sys.emitAccum -= 1;
         }
@@ -162,8 +167,11 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
             const life = 1.0 - sys.age[i] / sys.lifetime[i];
             const curl = curlNoise(sys.px[i] * 0.3, sys.py[i] * 0.3, sys.pz[i] * 0.3, globalT * 0.5);
 
-            sys.vx[i] += curl.x * turbulenceStr * dt + (windX || 0) * 0.04 * dt;
-            sys.vy[i] += curl.y * turbulenceStr * dt + thermalStr * life * dt + (windY || 0) * 0.02 * dt;
+            // Hot particles rise faster (buoyancy), cool particles (smoke) driven by wind
+            const isSmoke = sys.type === 'flame' && life < 0.25;
+            
+            sys.vx[i] += curl.x * turbulenceStr * dt + (windX || 0) * (isSmoke ? 0.15 : 0.04) * dt;
+            sys.vy[i] += curl.y * turbulenceStr * dt + thermalStr * Math.pow(life, 1.5) * dt + (windY || 0) * (isSmoke ? 0.05 : 0.02) * dt;
             sys.vz[i] += curl.z * turbulenceStr * dt;
 
             if (sys.type === 'spark') {
@@ -181,17 +189,20 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
 
             // Colour
             if (sys.type === 'flame') {
-                if (life > 0.75) {
-                    sys.cr[i] = 1.0; sys.cg[i] = 1.0; sys.cb[i] = 0.8;      // white-hot core
-                } else if (life > 0.5) {
-                    const r = (life - 0.5) / 0.25;
-                    sys.cr[i] = 1.0; sys.cg[i] = 0.5 + r * 0.5; sys.cb[i] = r * 0.8;
-                } else if (life > 0.25) {
-                    const r = (life - 0.25) / 0.25;
-                    sys.cr[i] = 1.0; sys.cg[i] = 0.1 + r * 0.4; sys.cb[i] = 0.0;
+                if (life > 0.85) {
+                    sys.cr[i] = 1.0; sys.cg[i] = 0.9; sys.cb[i] = 1.0;      // bluish/white core
+                } else if (life > 0.6) {
+                    const r = (life - 0.6) / 0.25;
+                    sys.cr[i] = 1.0; sys.cg[i] = 0.7 + r * 0.2; sys.cb[i] = r * 0.8; // intense yellow
+                } else if (life > 0.35) {
+                    const r = (life - 0.35) / 0.25;
+                    sys.cr[i] = 1.0; sys.cg[i] = 0.2 + r * 0.5; sys.cb[i] = 0.0;     // orange
+                } else if (life > 0.2) {
+                    const r = (life - 0.2) / 0.15;
+                    sys.cr[i] = 0.4 + r * 0.6; sys.cg[i] = r * 0.2; sys.cb[i] = 0.0; // dark red ember
                 } else {
-                    const r = life / 0.25;
-                    sys.cr[i] = 0.3 + r * 0.7; sys.cg[i] = 0.0; sys.cb[i] = 0.0; // dark red ember
+                    const r = life / 0.2;
+                    sys.cr[i] = r * 0.15; sys.cg[i] = r * 0.15; sys.cb[i] = r * 0.15; // black/dark smoke
                 }
             } else {
                 sys.cr[i] = 1.0;
@@ -204,7 +215,8 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
             posArray[i3 + 2] = sys.pz[i];
             ageArray[i]      = sys.age[i];
             ltArray[i]       = sys.lifetime[i];
-            sizeArray[i]     = sys.size[i] * life;
+            // Expand size for smoke
+            sizeArray[i]     = (sys.type === 'flame' && life < 0.2) ? sys.size[i] * (0.2 + (0.2 - life) * 1.5) : sys.size[i] * life;
             colorArray[i3]     = sys.cr[i];
             colorArray[i3 + 1] = sys.cg[i];
             colorArray[i3 + 2] = sys.cb[i];
@@ -212,7 +224,8 @@ if (typeof self !== "undefined") self.onmessage = function(e) {
 
         self.postMessage({
             type: 'updated',
-            id
+            id,
+            burstIntensity: sys.burstIntensity
         });
 
     } else if (type === 'dispose') {
