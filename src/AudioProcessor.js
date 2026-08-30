@@ -115,6 +115,10 @@ const BEAT_HISTORY = 43;
 const beatEnergy = new Float32Array(BEAT_HISTORY);
 let beatPtr = 0;
 
+// NOTE: the main branch carried a stub `class AudioProcessor` here whose only
+// method was a TODO reading "Migrate loadAudio and detectBeat logic here". That
+// migration is what the object below already is, so the stub was dropped during
+// the merge rather than kept as a second, conflicting export of the same name.
 export const AudioProcessor = {
 // ── Revised loadAudio ─────────────────────────────────────────
 async loadAudio(file) {
