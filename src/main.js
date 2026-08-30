@@ -1050,7 +1050,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23, 'neonpulse-wave': 24
 };
 
 const laserUniforms = {
@@ -3718,6 +3718,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   } else if (CFG.theme === 'cybertron' && playing && !isSilent) {
     wanted = 'cybertron-scan';
 
+  } else if (CFG.theme === 'neonpulse' && playing && !isSilent) {
+    wanted = 'neonpulse-wave';
+
   } else if (CFG.theme === 'cosmic' && playing && !isSilent) {
     wanted = 'scatter';
   } else if (CFG.theme === 'eclipse' && playing && !isSilent) {
@@ -5916,6 +5919,14 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const driftY = tAnim * lyf * 0.15;
                     localPan = norm2 * 0.9 * sp + Math.sin(driftX + lxp) * 0.2 * sp;
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
+                    break;
+                }
+                case 'neonpulse-wave': {
+                    const pulseSpeed = tAnim * 2.5;
+                    const waveAmplitude = 0.9 * sp;
+                    localPan = norm2 * 0.8 * sp + Math.sin(pulseSpeed + phaseOff * 0.5) * waveAmplitude * 0.4;
+                    localTilt = tiltRad + Math.sin(pulseSpeed * 0.8 + norm2 * Math.PI) * waveAmplitude * (1 + bass * 0.4);
+                    patternOpMod = 0.5 + 0.5 * Math.sin(pulseSpeed * 1.5 + phaseOff);
                     break;
                 }
                 default: {
