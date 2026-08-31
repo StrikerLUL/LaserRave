@@ -281,53 +281,61 @@ const W = window.innerWidth, H = window.innerHeight;
 
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance"
-  });
-  renderer.setSize(W, H);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
-  renderer.shadowMap.enabled = true;
-  // PCFSoftShadowMap is deprecated as of three r183 and silently falls back to
-  // PCFShadowMap while logging a warning on every load. Ask for what we actually
-  // get; the softness now comes from the radius set on each light's shadow.
-  renderer.shadowMap.type = THREE.PCFShadowMap;
-  console.log('WebGLRenderer initialized successfully');
-  document.getElementById('canvas-container').appendChild(renderer.domElement);
+  if (typeof WebGPURenderer === 'undefined') {
+    throw new Error('WebGPURenderer is not defined');
+  }
+  // Force fallback to WebGLRenderer since we rely on ShaderMaterial
+  throw new Error('Forced fallback to WebGLRenderer for ShaderMaterial support');
 } catch (e) {
-  console.error("Critical renderer initialization error:", e);
-  const fallbackDiv = document.createElement('div');
-  fallbackDiv.style.position = 'absolute';
-  fallbackDiv.style.top = '50%';
-  fallbackDiv.style.left = '50%';
-  fallbackDiv.style.transform = 'translate(-50%, -50%)';
-  fallbackDiv.style.color = 'white';
-  fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
-  fallbackDiv.style.padding = '20px';
-  fallbackDiv.style.borderRadius = '10px';
-  fallbackDiv.style.fontFamily = 'sans-serif';
-  fallbackDiv.style.zIndex = '9999';
-  fallbackDiv.innerHTML = '<h3>WebGL Error</h3><p>Sorry, your browser or device does not support the WebGL rendering required by this application.</p>';
-  document.body.appendChild(fallbackDiv);
+  console.warn('Falling back to WebGLRenderer:', e.message);
+  try {
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    renderer.setSize(W, H);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.shadowMap.enabled = true;
+    // PCFSoftShadowMap is deprecated as of three r183 and silently falls back to
+    // PCFShadowMap while logging a warning on every load. Ask for what we actually
+    // get; the softness now comes from the radius set on each light's shadow.
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    console.log('WebGLRenderer initialized successfully');
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+  } catch (fallbackErr) {
+    console.error("Critical renderer initialization error:", fallbackErr);
+    const fallbackDiv = document.createElement('div');
+    fallbackDiv.style.position = 'absolute';
+    fallbackDiv.style.top = '50%';
+    fallbackDiv.style.left = '50%';
+    fallbackDiv.style.transform = 'translate(-50%, -50%)';
+    fallbackDiv.style.color = 'white';
+    fallbackDiv.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+    fallbackDiv.style.padding = '20px';
+    fallbackDiv.style.borderRadius = '10px';
+    fallbackDiv.style.fontFamily = 'sans-serif';
+    fallbackDiv.innerHTML = `<h3>Render Error</h3><p>${fallbackErr.message}</p>`;
+    document.body.appendChild(fallbackDiv);
 
-  // Mock renderer to prevent immediate downstream TypeError crashes
-  renderer = {
-    render: () => {},
-    setAnimationLoop: (cb) => {
-        function loop() { cb(); requestAnimationFrame(loop); }
-        requestAnimationFrame(loop);
-    },
-    setSize: () => {},
-    setPixelRatio: () => {},
-    toneMapping: THREE.NoToneMapping,
-    init: async () => {},
-    clear: () => {},
-    domElement: Object.assign(document.createElement('canvas'), {
-        captureStream: () => new MediaStream()
-    })
-  };
+    // Mock renderer to prevent immediate downstream TypeError crashes
+    renderer = {
+      render: () => {},
+      setAnimationLoop: (cb) => {
+          function loop() { cb(); requestAnimationFrame(loop); }
+          requestAnimationFrame(loop);
+      },
+      setSize: () => {},
+      setPixelRatio: () => {},
+      toneMapping: THREE.NoToneMapping,
+      init: async () => {},
+      clear: () => {},
+      domElement: Object.assign(document.createElement('canvas'), {
+          captureStream: () => new MediaStream()
+      })
+    };
+  }
 }
 
 // ─── Audio Core Globals (Declared early to prevent TDZ ReferenceError) ───
@@ -5533,24 +5541,36 @@ async function loadAudio(file) {
     playbackStartOffset = 0;
 
     if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-
-    audioBuffer = await new Promise((resolve, reject) => {
+      // Graceful fallback for missing file
       try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
-        }
-      } catch (err) {
-        reject(err);
+          const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtx) {
+              const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+              audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+          } else {
+              throw new Error("No OfflineAudioContext");
+          }
+      } catch (e) {
+          audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
       }
-    });
+    } else {
+      const ab = await file.arrayBuffer();
+      if (!audioCtx) throw new Error("AudioContext not initialized");
+
+      audioBuffer = await new Promise((resolve, reject) => {
+        try {
+          const p = audioCtx.decodeAudioData(ab, resolve, reject);
+          if (p && typeof p.catch === 'function') {
+            p.catch(reject);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = playlist.find(item => (file && item.file === file) || (file && item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -9439,6 +9459,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             },
             error: (e) => console.error("VideoEncoder Error", e)
         };
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder is not defined");
+        }
         encoder = new VideoEncoder(init);
         // Simple codec configuration
         encoder.configure({
@@ -9486,6 +9509,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap is not defined");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
