@@ -2050,7 +2050,7 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23, 'plasma-surge': 24
 };
 
 const laserUniforms = {
@@ -2327,6 +2327,12 @@ const laserVertexShader = `
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
       }
+      else if (uPattern == 24) { // plasma-surge
+          float surgeSpeed = uTime * 2.2;
+          float surgePhase = wn * 3.1415 * 6.0;
+          localPan = sin(surgeSpeed + surgePhase) * 0.7 * sp + cos(surgeSpeed * 1.5 + phaseOff) * 0.3 * sp;
+          localTilt = uTilt + cos(surgeSpeed * 1.3 + wn * 3.1415) * 0.4 * sp + uBass * 0.5;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -2358,6 +2364,8 @@ const laserVertexShader = `
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
           } else if (uPattern == 23) {
               patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
+          } else if (uPattern == 24) {
+              patternOpMod = 0.5 + sin(uTime * 4.0 + aInstanceID * 2.0) * 0.5 + uEnergy * 0.2;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -2636,6 +2644,12 @@ const laserSpotsVertexShader = `
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
       }
+      else if (uPattern == 24) { // plasma-surge
+          float surgeSpeed = uTime * 2.2;
+          float surgePhase = wn * 3.1415 * 6.0;
+          localPan = sin(surgeSpeed + surgePhase) * 0.7 * sp + cos(surgeSpeed * 1.5 + phaseOff) * 0.3 * sp;
+          localTilt = uTilt + cos(surgeSpeed * 1.3 + wn * 3.1415) * 0.4 * sp + uBass * 0.5;
+      }
       else {
           localTilt = uTilt;
           localPan = norm2 * 0.5;
@@ -2665,6 +2679,8 @@ const laserSpotsVertexShader = `
               patternOpMod = (sin(uTime * 12.0 + aInstanceID * 5.0) > 0.5) ? 1.0 : 0.2;
           } else if (uPattern == 23) {
               patternOpMod = 0.4 + (sin(uTime * 3.0 + aInstanceID * 11.0) * sin(uTime * 1.5 + aInstanceID * 3.7)) * 0.6;
+          } else if (uPattern == 24) {
+              patternOpMod = 0.5 + sin(uTime * 4.0 + aInstanceID * 2.0) * 0.5 + uEnergy * 0.2;
           } else if (uPattern == 7) {
               if (uStrobeOn < 0.5 && uPlaying > 0.5) {
                   patternOpMod = 0.0;
@@ -5014,6 +5030,8 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
     wanted = 'blood-sweep';
   } else if (CFG.theme === 'starlight' && playing && !isSilent) {
     wanted = 'starlight';
+  } else if (CFG.theme === 'plasma' && playing && !isSilent) {
+    wanted = 'plasma-surge';
   } else if (CFG.theme === 'toxic' && playing && !isSilent) {
     wanted = 'radioactive';
 
@@ -7650,6 +7668,13 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
                     break;
                 }
+                case 'plasma-surge': {
+                    const surgeSpeed = tAnim * 2.2;
+                    const surgePhase = wn * Math.PI * 6.0;
+                    localPan = Math.sin(surgeSpeed + surgePhase) * 0.7 * sp + Math.cos(surgeSpeed * 1.5 + phaseOff) * 0.3 * sp;
+                    localTilt = tiltRad + Math.cos(surgeSpeed * 1.3 + wn * Math.PI) * 0.4 * sp + bass * 0.5;
+                    break;
+                }
                 default: {
                     localTilt = tiltRad;
                     localPan  = norm2 * 0.5;
@@ -7729,6 +7754,8 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                 patternOpMod = 0.6 + Math.sin(tAnim * 1.5 + phaseOff) * 0.4;
             } else if (pat === 'starlight') {
                 patternOpMod = 0.4 + (Math.sin(tAnim * 3.0 + i * 11.0) * Math.sin(tAnim * 1.5 + i * 3.7)) * 0.6;
+            } else if (pat === 'plasma-surge') {
+                patternOpMod = 0.5 + Math.sin(tAnim * 4.0 + i * 2.0) * 0.5 + energy * 0.2;
             } else if (pat === 'cybertron-scan') {
                 const scanPos = (tAnim * 1.5) - Math.floor(tAnim * 1.5);
                 patternOpMod = Math.abs(wn - scanPos) < 0.15 ? 1.0 : 0.2;
