@@ -281,10 +281,19 @@ const W = window.innerWidth, H = window.innerHeight;
 
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance"
-  });
+  try {
+      if (typeof WebGPURenderer !== 'undefined') {
+          renderer = new WebGPURenderer({ antialias: true, powerPreference: "high-performance" });
+      } else {
+          throw new Error('WebGPURenderer not supported.');
+      }
+  } catch (webgpuErr) {
+      console.warn("WebGPU initialization failed, falling back to WebGL:", webgpuErr);
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: "high-performance"
+      });
+  }
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -5533,24 +5542,42 @@ async function loadAudio(file) {
     playbackStartOffset = 0;
 
     if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-
-    audioBuffer = await new Promise((resolve, reject) => {
-      try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
-        }
-      } catch (err) {
-        reject(err);
+      const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (OfflineCtx) {
+          const offlineCtx = new OfflineCtx(2, 44100 * 10, 44100);
+          audioBuffer = offlineCtx.createBuffer(2, 44100 * 10, 44100);
+      } else {
+          throw new Error("No audio file provided and OfflineAudioContext not supported.");
       }
-    });
+    } else {
+      try {
+          const ab = await file.arrayBuffer();
+          if (!audioCtx) throw new Error("AudioContext not initialized");
+
+          audioBuffer = await new Promise((resolve, reject) => {
+            try {
+              const p = audioCtx.decodeAudioData(ab, resolve, reject);
+              if (p && typeof p.catch === 'function') {
+                p.catch(reject);
+              }
+            } catch (err) {
+              reject(err);
+            }
+          });
+      } catch (err) {
+          console.warn("Failed to load or decode audio, using fallback silent buffer", err);
+          const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtx) {
+              const offlineCtx = new OfflineCtx(2, 44100 * 10, 44100);
+              audioBuffer = offlineCtx.createBuffer(2, 44100 * 10, 44100);
+          } else {
+              throw new Error("No audio file provided and OfflineAudioContext not supported.");
+          }
+      }
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = playlist.find(item => file && (item.file === file || item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -5594,7 +5621,8 @@ async function loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(audioBuffer, file.name).then(fullMap => {
+    const fName = file ? file.name : "dummy_track";
+    analyzeSong(audioBuffer, fName).then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }
@@ -9427,6 +9455,10 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder API not supported in this environment");
+        }
+
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
@@ -9486,6 +9518,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap API not supported");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });

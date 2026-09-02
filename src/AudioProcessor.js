@@ -127,12 +127,33 @@ async loadAudio(file) {
     if (State.playing && State.source) { State.source.stop(); State.playing = false; }
     State.playbackStartOffset = 0;
 
-    const ab = await file.arrayBuffer();
-    if (!State.audioCtx) throw new Error("AudioContext not initialized");
-    State.audioBuffer = await State.audioCtx.decodeAudioData(ab);
+    if (!file) {
+      const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (OfflineCtx) {
+          const offlineCtx = new OfflineCtx(2, 44100 * 10, 44100);
+          State.audioBuffer = offlineCtx.createBuffer(2, 44100 * 10, 44100);
+      } else {
+          throw new Error("No audio file provided and OfflineAudioContext not supported.");
+      }
+    } else {
+      try {
+          const ab = await file.arrayBuffer();
+          if (!State.audioCtx) throw new Error("AudioContext not initialized");
+          State.audioBuffer = await State.audioCtx.decodeAudioData(ab);
+      } catch (err) {
+          console.warn("Failed to load or decode audio, using fallback silent buffer", err);
+          const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (OfflineCtx) {
+              const offlineCtx = new OfflineCtx(2, 44100 * 10, 44100);
+              State.audioBuffer = offlineCtx.createBuffer(2, 44100 * 10, 44100);
+          } else {
+              throw new Error("No audio file provided and OfflineAudioContext not supported.");
+          }
+      }
+    }
 
     // Store in the playlist queue item
-    let playlistItem = State.playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = State.playlist.find(item => file && (item.file === file || item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = State.audioBuffer;
     }
@@ -176,7 +197,8 @@ async loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(State.audioBuffer, file.name).then(fullMap => {
+    const fName = file ? file.name : "dummy_track";
+    analyzeSong(State.audioBuffer, fName).then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }

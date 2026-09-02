@@ -176,6 +176,10 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder API not supported in this environment");
+        }
+
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
@@ -235,6 +239,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap API not supported");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
