@@ -127,12 +127,24 @@ async loadAudio(file) {
     if (State.playing && State.source) { State.source.stop(); State.playing = false; }
     State.playbackStartOffset = 0;
 
-    const ab = await file.arrayBuffer();
-    if (!State.audioCtx) throw new Error("AudioContext not initialized");
-    State.audioBuffer = await State.audioCtx.decodeAudioData(ab);
+    try {
+        if (!file) throw new Error("No audio file provided.");
+        const ab = await file.arrayBuffer();
+        if (!State.audioCtx) throw new Error("AudioContext not initialized");
+        State.audioBuffer = await State.audioCtx.decodeAudioData(ab);
+    } catch(err) {
+        console.warn("Failed to decode audio, using silent fallback buffer:", err);
+        const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (OfflineCtx) {
+            const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+            State.audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+        } else {
+            State.audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
+    }
 
     // Store in the playlist queue item
-    let playlistItem = State.playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = State.playlist.find(item => item.file === file || (file && item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = State.audioBuffer;
     }
@@ -176,7 +188,8 @@ async loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(State.audioBuffer, file.name).then(fullMap => {
+    const fileName = file ? file.name : "fallback";
+    analyzeSong(State.audioBuffer, fileName).then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }
@@ -195,74 +208,7 @@ async loadAudio(file) {
     console.error("Error loading audio:", error);
     alert("Could not load the audio file. Falling back to a silent placeholder track.");
 
-    // Graceful fallback for audio buffer
-    try {
-        initAudioContext();
-        if (!State.audioCtx) throw new Error("No audioCtx available for fallback");
-
-        let localAudioBuffer = null;
-        try {
-            localAudioBuffer = State.audioCtx.createBuffer(1, State.audioCtx.sampleRate * 10, State.audioCtx.sampleRate);
-        } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
-            } else {
-                throw e;
-            }
-        }
-
-        if (!localAudioBuffer) throw new Error("Could not create actual AudioBuffer instance");
-
-        State.audioBuffer = localAudioBuffer;
-        State.songMap = {
-            bpm: 120,
-            beats: [{ time: 0, strength: 1 }],
-            sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-            bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
-            hopSec: 0.1, N: 100
-        };
-        State.waveformValid = false;
-    } catch (fallbackError) {
-        console.error("Fallback audio generation failed:", fallbackError);
-        // Attempt one last time to create an AudioBuffer, otherwise use the plain object
-        try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                State.audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
-            } else {
-                throw new Error("No AudioContext");
-            }
-        } catch (e2) {
-             State.audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
-        }
-
-        State.songMap = {
-            bassMap: new Float32Array(100),
-            midMap: new Float32Array(100),
-            highMap: new Float32Array(100),
-            melodyMap: new Float32Array(100),
-            energyMap: new Float32Array(100),
-            buildUpMap: new Float32Array(100),
-            beats: [{ time: 0, str: 1 }],
-            sections: [{
-                startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
-                start: 0, end: 10, intensity: 1, type: "drop",
-                avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
-                bassW: 0.33, midW: 0.33, trebleW: 0.33,
-                seed: 0, id: 0,
-                baseHue: 0, pattern: 'sidesweep',
-                liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
-                speedScale: 1, spreadMod: 1
-            }],
-            hopSec: 0.1, hop: 4410, N: 100, bpm: 120
-        };
-        State.waveformValid = false;
-    }
+    // Fallback songMap is already assigned above.
   }
 },
 detectBeat(bass) {

@@ -5532,25 +5532,36 @@ async function loadAudio(file) {
     if (playing && source) { source.stop(); playing = false; }
     playbackStartOffset = 0;
 
-    if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-
-    audioBuffer = await new Promise((resolve, reject) => {
-      try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
+    try {
+        if (!file) {
+          throw new Error("No audio file provided.");
         }
-      } catch (err) {
-        reject(err);
-      }
-    });
+        const ab = await file.arrayBuffer();
+        if (!audioCtx) throw new Error("AudioContext not initialized");
+
+        audioBuffer = await new Promise((resolve, reject) => {
+          try {
+            const p = audioCtx.decodeAudioData(ab, resolve, reject);
+            if (p && typeof p.catch === 'function') {
+              p.catch(reject);
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+    } catch (err) {
+        console.warn("Failed to decode audio, using silent fallback buffer:", err);
+        const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (OfflineCtx) {
+            const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+            audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+        } else {
+            audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+        }
+    }
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
+    let playlistItem = playlist.find(item => item.file === file || (file && item.name === file.name));
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -5594,7 +5605,8 @@ async function loadAudio(file) {
     updateTimeline();
 
     // Asynchronously trigger detailed analysis in the background
-    analyzeSong(audioBuffer, file.name).then(fullMap => {
+    const fileName = file ? file.name : "fallback";
+    analyzeSong(audioBuffer, fileName).then(fullMap => {
       if (playlistItem) {
         playlistItem.songMap = fullMap;
       }
@@ -5612,85 +5624,6 @@ async function loadAudio(file) {
   } catch (error) {
     console.error("Error loading audio:", error);
     alert("Could not load the audio file. Falling back to a silent placeholder track.");
-
-    // Graceful fallback for audio buffer
-    try {
-        initAudioContext();
-        if (!audioCtx) throw new Error("No audioCtx available for fallback");
-
-        let localAudioBuffer = null;
-        try {
-            localAudioBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
-        } catch (e) {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                localAudioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
-            } else {
-                throw e;
-            }
-        }
-
-        if (!localAudioBuffer) throw new Error("Could not create actual AudioBuffer instance");
-
-        audioBuffer = localAudioBuffer;
-        songMap = {
-            bpm: 120,
-            beats: [{ time: 0, strength: 1 }],
-            sections: [{ startFrame: 0, endFrame: 100, startTime: 0, endTime: 10, intensity: 1, type: "drop", pattern: 'sidesweep', baseHue: 0, liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 }, speedScale: 1, spreadMod: 1 }],
-            bassMap: new Float32Array(100), midMap: new Float32Array(100), highMap: new Float32Array(100), energyMap: new Float32Array(100),
-            hopSec: 0.1, N: 100
-        };
-        waveformValid = false;
-    } catch (fallbackError) {
-        console.error("Fallback audio generation failed:", fallbackError);
-        // Attempt one last time to create an AudioBuffer, otherwise use the plain object
-        try {
-            const TempAudioContext = window.AudioContext || window.webkitAudioContext;
-            if (TempAudioContext) {
-                const tempCtx = new TempAudioContext();
-                audioBuffer = tempCtx.createBuffer(1, tempCtx.sampleRate * 10, tempCtx.sampleRate);
-                tempCtx.close().catch(() => {});
-            } else {
-                throw new Error("No AudioContext");
-            }
-        } catch (e2) {
-             try {
-                 const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-                 if (OfflineCtx) {
-                     const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
-                     audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
-                 } else {
-                     throw new Error("No OfflineAudioContext");
-                 }
-             } catch (e3) {
-                 audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
-             }
-        }
-
-        songMap = {
-            bassMap: new Float32Array(100),
-            midMap: new Float32Array(100),
-            highMap: new Float32Array(100),
-            melodyMap: new Float32Array(100),
-            energyMap: new Float32Array(100),
-            buildUpMap: new Float32Array(100),
-            beats: [{ time: 0, str: 1 }],
-            sections: [{
-                startFrame: 0, endFrame: 100, startTime: 0, endTime: 10,
-                start: 0, end: 10, intensity: 1, type: "drop",
-                avgBass: 0.5, avgMid: 0.5, avgHigh: 0.5, avgEnergy: 0.5,
-                bassW: 0.33, midW: 0.33, trebleW: 0.33,
-                seed: 0, id: 0,
-                baseHue: 0, pattern: 'sidesweep',
-                liss: { xf: 0.13, yf: 0.1, zf: 0.17, xp: 0, yp: 0, zp: 0 },
-                speedScale: 1, spreadMod: 1
-            }],
-            hopSec: 0.1, hop: 4410, N: 100, bpm: 120
-        };
-        waveformValid = false;
-    }
   }
 }
 
@@ -9439,6 +9372,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             },
             error: (e) => console.error("VideoEncoder Error", e)
         };
+        if (typeof VideoEncoder === 'undefined') {
+            throw new Error("VideoEncoder is not supported in this environment");
+        }
         encoder = new VideoEncoder(init);
         // Simple codec configuration
         encoder.configure({
@@ -9486,6 +9422,9 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') {
+                    throw new Error("createImageBitmap is not supported in this environment");
+                }
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
