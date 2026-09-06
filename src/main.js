@@ -2050,7 +2050,8 @@ const PATTERN_IDS = {
     'sidesweep': 5, 'vortex': 6, 'strobe': 7, 'scatter': 8, 'sine': 9,
     'chase': 10, 'chase-fast': 11, 'zigzag': 12, 'sparkle': 13, 'pulse': 14,
     'starburst': 15, 'flame': 16, 'supernova': 17, 'phantom': 18, 'eclipse': 19,
-    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23
+    'glacier': 20, 'hexagon': 21, 'blood-sweep': 22, 'starlight': 23,
+    'retrowave': 24
 };
 
 const laserUniforms = {
@@ -2326,6 +2327,10 @@ const laserVertexShader = `
           float driftY = uTime * lyf * 0.15;
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
+      else if (uPattern == 24) { // retrowave
+          localPan = sin(uTime * lxf * 0.8) * sp + uBass * 0.3 * norm2;
+          localTilt = uTilt + cos(uTime * lyf * 0.8 + lyp) * 0.2 * sp;
       }
       else {
           localTilt = uTilt;
@@ -2635,6 +2640,10 @@ const laserSpotsVertexShader = `
           float driftY = uTime * lyf * 0.15;
           localPan = norm2 * 0.9 * sp + sin(driftX + lxp) * 0.2 * sp;
           localTilt = uTilt + cos(driftY + lyp) * 0.15 * sp - 0.1;
+      }
+      else if (uPattern == 24) {
+          localPan = sin(uTime * lxf * 0.8) * sp + uBass * 0.3 * norm2;
+          localTilt = uTilt + cos(uTime * lyf * 0.8 + lyp) * 0.2 * sp;
       }
       else {
           localTilt = uTilt;
@@ -4980,6 +4989,9 @@ function livePatternDecider(bass, mid, high, energy, kick, buildUp, melody, drum
   } else if (CFG.theme === 'synthwave' && playing && !isSilent) {
     // Force the vortex pattern when the synthwave theme is active and music is playing
     wanted = 'vortex';
+
+  } else if (CFG.theme === 'outrun' && playing && !isSilent) {
+    wanted = 'retrowave';
 
   } else if (CFG.theme === 'ocean' && playing && !isSilent) {
     wanted = 'ocean-wave';
@@ -7648,6 +7660,11 @@ function updateInstancedLasers(t, tAnim, energy, bass, mid, high, kick, isPeakDr
                     const driftY = tAnim * lyf * 0.15;
                     localPan = norm2 * 0.9 * sp + Math.sin(driftX + lxp) * 0.2 * sp;
                     localTilt = tiltRad + Math.cos(driftY + lyp) * 0.15 * sp - 0.1;
+                    break;
+                }
+                case 'retrowave': {
+                    localPan = Math.sin(tAnim * lxf * 0.8) * sp + bass * 0.3 * norm2;
+                    localTilt = tiltRad + Math.cos(tAnim * lyf * 0.8 + lyp) * 0.2 * sp;
                     break;
                 }
                 default: {
