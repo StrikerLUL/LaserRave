@@ -281,6 +281,9 @@ const W = window.innerWidth, H = window.innerHeight;
 
 let renderer;
 try {
+  if (!window.WebGLRenderingContext) {
+    throw new Error("WebGL not supported");
+  }
   renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: "high-performance"
@@ -309,7 +312,7 @@ try {
   fallbackDiv.style.borderRadius = '10px';
   fallbackDiv.style.fontFamily = 'sans-serif';
   fallbackDiv.style.zIndex = '9999';
-  fallbackDiv.innerHTML = '<h3>WebGL Error</h3><p>Sorry, your browser or device does not support the WebGL rendering required by this application.</p>';
+  fallbackDiv.innerHTML = '<h3>WebGL/WebGPU Error</h3><p>Sorry, your browser or device does not support the WebGL/WebGPU rendering required by this application.</p>';
   document.body.appendChild(fallbackDiv);
 
   // Mock renderer to prevent immediate downstream TypeError crashes
@@ -5533,24 +5536,45 @@ async function loadAudio(file) {
     playbackStartOffset = 0;
 
     if (!file) {
-      throw new Error("No audio file provided.");
-    }
-    const ab = await file.arrayBuffer();
-    if (!audioCtx) throw new Error("AudioContext not initialized");
-
-    audioBuffer = await new Promise((resolve, reject) => {
-      try {
-        const p = audioCtx.decodeAudioData(ab, resolve, reject);
-        if (p && typeof p.catch === 'function') {
-          p.catch(reject);
-        }
-      } catch (err) {
-        reject(err);
+      console.warn("No audio file provided, generating fallback buffer.");
+      const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (OfflineCtx) {
+          const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+          audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+      } else {
+          audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
       }
-    });
+    } else {
+        try {
+            const ab = await file.arrayBuffer();
+            if (!audioCtx) throw new Error("AudioContext not initialized");
+
+            audioBuffer = await new Promise((resolve, reject) => {
+              try {
+                const p = audioCtx.decodeAudioData(ab, resolve, reject);
+                if (p && typeof p.catch === 'function') {
+                  p.catch(reject);
+                }
+              } catch (err) {
+                reject(err);
+              }
+            });
+        } catch (e) {
+            console.warn("Error decoding audio data, generating fallback buffer.", e);
+            const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (OfflineCtx) {
+                const tempCtx = new OfflineCtx(1, 44100 * 10, 44100);
+                audioBuffer = tempCtx.createBuffer(1, 44100 * 10, 44100);
+            } else {
+                audioBuffer = { duration: 10, sampleRate: 44100, length: 441000, numberOfChannels: 1, getChannelData: () => new Float32Array(441000) };
+            }
+        }
+    }
+
+    // Safety check if playlistItem file exists
+    let playlistItem = file ? playlist.find(item => item.file === file || item.name === file.name) : null;
 
     // Store in the playlist queue item
-    let playlistItem = playlist.find(item => item.file === file || item.name === file.name);
     if (playlistItem) {
       playlistItem.audioBuffer = audioBuffer;
     }
@@ -9427,6 +9451,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
     }
 
     try {
+        if (typeof VideoEncoder === 'undefined') throw new Error("VideoEncoder not supported");
         const init = {
             output: (chunk, meta) => {
                 const buf = new Uint8Array(chunk.byteLength);
@@ -9486,6 +9511,7 @@ document.getElementById('btn-render').addEventListener('click', async () => {
             // Encode the accumulated frame
             // (Note: in a real PBR engine we need Accumulation shader. Here we just take the last sample for simplicity to not hang the browser!)
             try {
+                if (typeof createImageBitmap === 'undefined') throw new Error("createImageBitmap not supported");
                 const bmp = await createImageBitmap(renderer.domElement);
                 const vFrame = new VideoFrame(bmp, { timestamp: f * 1000000 / fps });
                 encoder.encode(vFrame, { keyFrame: f % 60 === 0 });
